@@ -1,0 +1,11 @@
+{
+    "id": "{B2C3D4E5-F6A7-8901-BCDE-F12345678901}",
+    "name": "Ultimate Voice Device",
+    "type": 3,
+    "vendor": "Andre Schmidt",
+    "aliases": ["UltimateVoiceDevice", "Ultimate Voice"],
+    "parentRequirements": [],
+    "childRequirements": [],
+    "implemented": [],
+    "prefix": "UVD"
+}

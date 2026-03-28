@@ -1,0 +1,101 @@
+{
+    "elements": [
+        {
+            "type": "ExpansionPanel",
+            "caption": "🔌 Server-Verbindung",
+            "items": [
+                {
+                    "name": "ServerURL",
+                    "type": "ValidationTextBox",
+                    "caption": "Server URL",
+                    "width": "400px",
+                    "value": "http://localhost:8000"
+                },
+                {
+                    "name": "APIKey",
+                    "type": "PasswordTextBox",
+                    "caption": "API Key",
+                    "width": "400px"
+                },
+                {
+                    "name": "CharacterID",
+                    "type": "ValidationTextBox",
+                    "caption": "Charakter ID",
+                    "width": "200px",
+                    "value": "butler_de"
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "🔊 Ausgabe (Echo / Alexa)",
+            "items": [
+                {
+                    "name": "EchoRemoteID",
+                    "type": "SelectInstance",
+                    "caption": "EchoRemote Instanz",
+                    "width": "400px",
+                    "moduleID": "{496AB8B5-396A-40E4-AF41-32F4AA6F5404}"
+                },
+                {
+                    "name": "FTPHost",
+                    "type": "ValidationTextBox",
+                    "caption": "FTP Host",
+                    "width": "300px"
+                },
+                {
+                    "name": "FTPUser",
+                    "type": "ValidationTextBox",
+                    "caption": "FTP Benutzer",
+                    "width": "200px"
+                },
+                {
+                    "name": "FTPPassword",
+                    "type": "PasswordTextBox",
+                    "caption": "FTP Passwort",
+                    "width": "200px"
+                },
+                {
+                    "name": "FTPRemotePath",
+                    "type": "ValidationTextBox",
+                    "caption": "FTP Remote-Pfad",
+                    "width": "300px",
+                    "value": "/voice/"
+                },
+                {
+                    "name": "WebserverBaseURL",
+                    "type": "ValidationTextBox",
+                    "caption": "Webserver Base URL",
+                    "width": "400px",
+                    "value": "https://example.com/voice/"
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "🧪 Test",
+            "items": [
+                {
+                    "type": "Select",
+                    "name": "TestEventType",
+                    "caption": "Test-Event",
+                    "value": "doorbell",
+                    "options": [
+                        { "caption": "Klingel (doorbell)", "value": "doorbell" },
+                        { "caption": "Batterie leer (battery_low)", "value": "battery_low" },
+                        { "caption": "Waschmaschine fertig (washer_done)", "value": "washer_done" },
+                        { "caption": "Willkommen (welcome)", "value": "welcome" },
+                        { "caption": "Auf Wiedersehen (goodbye)", "value": "goodbye" }
+                    ]
+                },
+                {
+                    "type": "Button",
+                    "caption": "▶ Sprechen + Echo Announce",
+                    "onClick": "UVD_TestSpeak($id);"
+                }
+            ]
+        }
+    ],
+    "actions": [],
+    "status": []
+}

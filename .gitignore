@@ -1,0 +1,4 @@
+# IPS local data — never commit
+*.db
+*.log
+/cache/
