@@ -50,7 +50,8 @@
                     "width": "350px",
                     "value": "webhook",
                     "options": [
-                        { "caption": "Webhook via IPS Connect (Free)", "value": "webhook" },
+                        { "caption": "IPS /user/-Verzeichnis via Connect (Free)", "value": "userdir" },
+                        { "caption": "Webhook via IPS Connect (experimentell)", "value": "webhook" },
                         { "caption": "Direkt vom Server (Premium)", "value": "direct" }
                     ]
                 },

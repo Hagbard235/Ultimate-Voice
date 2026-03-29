@@ -29,7 +29,7 @@ class UltimateVoiceDevice extends IPSModule
         $this->RegisterPropertyString('ServerURL',     'https://voice.smarthome-services.xyz');
         $this->RegisterPropertyString('APIKey',        '');
         $this->RegisterPropertyString('CharacterID',   'butler_de');
-        $this->RegisterPropertyString('DeliveryMode',  'webhook');
+        $this->RegisterPropertyString('DeliveryMode',  'userdir');
         $this->RegisterPropertyInteger('EchoRemoteID', 0);
         $this->RegisterPropertyString('TestEventType', 'doorbell');
 
@@ -54,26 +54,32 @@ class UltimateVoiceDevice extends IPSModule
             return;
         }
 
-        // Webhook registrieren — ProcessHookData() liefert die MP3 an Alexa aus
-        $hookPath = '/hook/uv_' . $this->InstanceID;
-        try {
-            $this->RegisterHook($hookPath);
-            $this->SendDebug('Webhook', "Hook registriert: $hookPath", 0);
-            $this->LogMessage("UV: Hook registriert: $hookPath", KL_MESSAGE);
+        // userdir-Modus: Connect URL ausgeben als Info
+        if ($mode === 'userdir') {
+            $connectURL = $this->GetConnectURL();
+            $userDir    = IPS_GetKernelDir() . 'user' . DIRECTORY_SEPARATOR;
+            $this->SendDebug('UserDir', "Ablage-Pfad: $userDir", 0);
+            if (!empty($connectURL)) {
+                $this->SendDebug('UserDir', "Alexa-URL-Muster: {$connectURL}/user/uv_{uuid}.mp3", 0);
+                $this->LogMessage("UV: UserDir-Modus aktiv. Alexa-URL: {$connectURL}/user/uv_{uuid}.mp3", KL_MESSAGE);
+            }
+        }
 
-            if (IPS_ModuleExists('{9486D575-EE8C-40D7-9051-7E30E223C581}')) {
+        // Webhook-Modus: RegisterHook versuchen (erfordert WebHook Control in IPS)
+        if ($mode === 'webhook') {
+            $hookPath = '/hook/uv_' . $this->InstanceID;
+            try {
+                $this->RegisterHook($hookPath);
+                $this->SendDebug('Webhook', "Hook registriert: $hookPath", 0);
+                $this->LogMessage("UV: Hook registriert: $hookPath", KL_MESSAGE);
                 $connectURL = $this->GetConnectURL();
                 if (!empty($connectURL)) {
-                    $exampleURL = "$connectURL$hookPath?id={uuid}&char=$characterId";
-                    $this->SendDebug('Webhook', "Öffentliche URL: $exampleURL", 0);
-                    $this->LogMessage("UV: Webhook-URL: $exampleURL", KL_MESSAGE);
-                } else {
-                    $this->SendDebug('Webhook', 'Connect URL leer — Connect aktiv?', 0);
+                    $this->SendDebug('Webhook', "URL: $connectURL$hookPath?id={uuid}&char=$characterId", 0);
                 }
+            } catch (\Throwable $e) {
+                $this->SendDebug('Webhook', 'RegisterHook fehlgeschlagen: ' . $e->getMessage(), 0);
+                $this->LogMessage('UV: RegisterHook fehlgeschlagen: ' . $e->getMessage(), KL_WARNING);
             }
-        } catch (\Throwable $e) {
-            $this->SendDebug('Webhook', 'RegisterHook fehlgeschlagen: ' . $e->getMessage(), 0);
-            $this->LogMessage('UV: RegisterHook fehlgeschlagen — WebHook Control in IPS aktiv? ' . $e->getMessage(), KL_WARNING);
         }
 
         $this->SetStatus(102);
@@ -143,8 +149,8 @@ class UltimateVoiceDevice extends IPSModule
             return false;
         }
 
-        // --- Step 1: Lokaler Cache-Check (nur webhook-Modus) ---
-        if ($mode === 'webhook') {
+        // --- Step 1: Lokaler Cache-Check (webhook + userdir) ---
+        if ($mode === 'webhook' || $mode === 'userdir') {
             $index  = $this->LoadLocalIndex();
             $cached = $index[$EventType] ?? null;
             $this->SendDebug('LocalCache', "event=$EventType | entry=" . ($cached ? json_encode($cached) : 'nicht vorhanden'), 0);
@@ -152,6 +158,9 @@ class UltimateVoiceDevice extends IPSModule
             if ($cached && file_exists($cached['path'])) {
                 $this->SendDebug('LocalCache', 'Hit! ' . $cached['path'], 0);
                 $this->LogMessage("UV: Lokaler Cache-Hit für '$EventType'", KL_MESSAGE);
+                if ($mode === 'userdir') {
+                    return $this->AnnounceViaUserDir($cached['file_id']);
+                }
                 return $this->AnnounceViaWebhook($cached['file_id']);
             }
             $this->SendDebug('LocalCache', 'Miss — Server wird angefragt', 0);
@@ -179,12 +188,12 @@ class UltimateVoiceDevice extends IPSModule
             return $this->AnnounceViaDirect($response['audio_url']);
         }
 
-        // Webhook: herunterladen → lokal speichern → via Webhook an Alexa
+        // userdir + webhook: herunterladen → lokal speichern
         $fileId    = $response['file_id'];
-        $localDir  = $this->GetCacheDir();
-        $localFile = $localDir . DIRECTORY_SEPARATOR . $fileId . '.mp3';
+        $localFile = $this->GetLocalFilePath($mode, $fileId);
+        $localDir  = dirname($localFile);
 
-        $this->SendDebug('Deliver', "webhook | file_id=$fileId | localFile=$localFile", 0);
+        $this->SendDebug('Deliver', "mode=$mode | file_id=$fileId | localFile=$localFile", 0);
 
         if (!file_exists($localFile) || !$response['from_cache']) {
             $this->SendDebug('Download', 'Starte Download: ' . $response['audio_url'], 0);
@@ -200,7 +209,7 @@ class UltimateVoiceDevice extends IPSModule
                 mkdir($localDir, 0755, true);
             }
             file_put_contents($localFile, $audioData);
-            $this->SendDebug('Download', 'Gespeichert: ' . $localFile . ' (' . strlen($audioData) . ' Bytes)', 0);
+            $this->SendDebug('Download', "Gespeichert: $localFile (" . strlen($audioData) . ' Bytes)', 0);
             $this->LogMessage("UV: Audio gespeichert — " . strlen($audioData) . " Bytes", KL_MESSAGE);
         } else {
             $this->SendDebug('Download', 'Übersprungen — Datei vorhanden', 0);
@@ -211,6 +220,9 @@ class UltimateVoiceDevice extends IPSModule
         $this->SaveLocalIndex($index);
         $this->SendDebug('LocalCache', "Index aktualisiert: $EventType → $fileId", 0);
 
+        if ($mode === 'userdir') {
+            return $this->AnnounceViaUserDir($fileId);
+        }
         return $this->AnnounceViaWebhook($fileId);
     }
 
@@ -303,6 +315,38 @@ class UltimateVoiceDevice extends IPSModule
     // =========================================================================
     // Private helpers
     // =========================================================================
+
+    /**
+     * USERDIR: MP3 liegt im IPS /user/-Verzeichnis, das über IPMagic öffentlich
+     * erreichbar ist. Kein Webhook, keine Registrierung nötig.
+     * URL: https://{hash}.ipmagic.de/user/uv_{fileId}.mp3
+     */
+    private function AnnounceViaUserDir(string $fileId): bool
+    {
+        $connectURL = $this->GetConnectURL();
+        if (empty($connectURL)) {
+            $this->SendDebug('Announce', 'FEHLER: Connect URL leer', 0);
+            $this->LogMessage('UV: Connect URL nicht verfügbar — userdir-Modus benötigt IPS Connect.', KL_ERROR);
+            return false;
+        }
+
+        $audioURL = $connectURL . '/user/uv_' . $fileId . '.mp3';
+        $this->SendDebug('Announce', "UserDir-URL für Alexa: $audioURL", 0);
+        return $this->SendSSMLToEcho($audioURL);
+    }
+
+    /**
+     * Gibt den lokalen Dateipfad je nach Modus zurück.
+     * userdir → IPS_GetKernelDir()/user/uv_{fileId}.mp3  (öffentlich via Connect)
+     * webhook → GetCacheDir()/{fileId}.mp3               (privat, via Webhook)
+     */
+    private function GetLocalFilePath(string $mode, string $fileId): string
+    {
+        if ($mode === 'userdir') {
+            return IPS_GetKernelDir() . 'user' . DIRECTORY_SEPARATOR . 'uv_' . $fileId . '.mp3';
+        }
+        return $this->GetCacheDir() . DIRECTORY_SEPARATOR . $fileId . '.mp3';
+    }
 
     private function AnnounceViaWebhook(string $fileId): bool
     {
