@@ -232,11 +232,11 @@ class UltimateVoiceDevice extends IPSModule
             $this->SendDebug('Download', 'Übersprungen — Datei vorhanden', 0);
         }
 
+        // Index aktualisieren — keine automatische Löschung alter Dateien hier!
+        // Im Produktivsystem gibt es mehrere Varianten pro Event (z.B. 5 Sätze).
+        // Dateien werden nur gelöscht wenn der Server sie explizit deprecatet
+        // (künftiger Sync-Endpunkt) oder via manuellem ClearCache()-Button.
         $index = $this->LoadLocalIndex();
-        // Alte Datei aus /user/ löschen wenn sich die file_id geändert hat
-        if (isset($index[$EventType]) && $index[$EventType]['file_id'] !== $fileId) {
-            $this->DeleteUserDirFile($index[$EventType]['file_id']);
-        }
         $index[$EventType] = ['file_id' => $fileId, 'path' => $localFile];
         $this->SaveLocalIndex($index);
         $this->SendDebug('LocalCache', "Index aktualisiert: $EventType → $fileId", 0);
