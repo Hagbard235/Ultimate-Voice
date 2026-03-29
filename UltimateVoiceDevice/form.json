@@ -2,7 +2,8 @@
     "elements": [
         {
             "type": "ExpansionPanel",
-            "caption": "🔌 Server-Verbindung",
+            "caption": "Server-Verbindung",
+            "expanded": true,
             "items": [
                 {
                     "name": "ServerURL",
@@ -19,16 +20,21 @@
                 },
                 {
                     "name": "CharacterID",
-                    "type": "ValidationTextBox",
-                    "caption": "Charakter ID",
-                    "width": "200px",
-                    "value": "butler_de"
+                    "type": "Select",
+                    "caption": "Charakter",
+                    "width": "250px",
+                    "value": "butler_de",
+                    "options": [
+                        { "caption": "Hawkins, der Butler (butler_de)", "value": "butler_de" },
+                        { "caption": "Hopsi, der Osterhase (osterhase_de)", "value": "osterhase_de" }
+                    ]
                 }
             ]
         },
         {
             "type": "ExpansionPanel",
-            "caption": "🔊 Ausgabe (Echo / Alexa)",
+            "caption": "Ausgabe (Echo / Alexa)",
+            "expanded": true,
             "items": [
                 {
                     "name": "EchoRemoteID",
@@ -38,42 +44,31 @@
                     "moduleID": "{496AB8B5-396A-40E4-AF41-32F4AA6F5404}"
                 },
                 {
-                    "name": "FTPHost",
-                    "type": "ValidationTextBox",
-                    "caption": "FTP Host",
-                    "width": "300px"
+                    "name": "DeliveryMode",
+                    "type": "Select",
+                    "caption": "Auslieferungs-Modus",
+                    "width": "350px",
+                    "value": "webhook",
+                    "options": [
+                        { "caption": "Webhook via IPS Connect (Free)", "value": "webhook" },
+                        { "caption": "Direkt vom Server (Premium)", "value": "direct" }
+                    ]
                 },
                 {
-                    "name": "FTPUser",
-                    "type": "ValidationTextBox",
-                    "caption": "FTP Benutzer",
-                    "width": "200px"
+                    "type": "Label",
+                    "caption": "Webhook: Alexa holt Audio via IPS Connect (IPMagic). IPS Connect muss aktiv sein.",
+                    "italic": true
                 },
                 {
-                    "name": "FTPPassword",
-                    "type": "PasswordTextBox",
-                    "caption": "FTP Passwort",
-                    "width": "200px"
-                },
-                {
-                    "name": "FTPRemotePath",
-                    "type": "ValidationTextBox",
-                    "caption": "FTP Remote-Pfad",
-                    "width": "300px",
-                    "value": "/voice/"
-                },
-                {
-                    "name": "WebserverBaseURL",
-                    "type": "ValidationTextBox",
-                    "caption": "Webserver Base URL",
-                    "width": "400px",
-                    "value": "https://example.com/voice/"
+                    "type": "Label",
+                    "caption": "Direkt: Alexa holt Audio direkt vom Ultimate Voice Server. Erfordert Premium-Abo.",
+                    "italic": true
                 }
             ]
         },
         {
             "type": "ExpansionPanel",
-            "caption": "🧪 Test",
+            "caption": "Test",
             "items": [
                 {
                     "type": "Select",
@@ -84,13 +79,18 @@
                         { "caption": "Klingel (doorbell)", "value": "doorbell" },
                         { "caption": "Batterie leer (battery_low)", "value": "battery_low" },
                         { "caption": "Waschmaschine fertig (washer_done)", "value": "washer_done" },
+                        { "caption": "Fenster offen (window_open)", "value": "window_open" },
+                        { "caption": "Bewegung (motion_detected)", "value": "motion_detected" },
                         { "caption": "Willkommen (welcome)", "value": "welcome" },
-                        { "caption": "Auf Wiedersehen (goodbye)", "value": "goodbye" }
+                        { "caption": "Auf Wiedersehen (goodbye)", "value": "goodbye" },
+                        { "caption": "Temperatur-Alarm (temperature_alert)", "value": "temperature_alert" },
+                        { "caption": "Regen (rain_alert)", "value": "rain_alert" },
+                        { "caption": "Timer fertig (timer_done)", "value": "timer_done" }
                     ]
                 },
                 {
                     "type": "Button",
-                    "caption": "▶ Sprechen + Echo Announce",
+                    "caption": "Sprechen + Echo Announce",
                     "onClick": "UVD_TestSpeak($id);"
                 }
             ]

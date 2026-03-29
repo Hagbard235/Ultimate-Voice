@@ -49,6 +49,11 @@ class UltimateVoiceDevice extends IPSModule
         // --- State variables ---
         $this->RegisterVariableString('LastSpokenText', 'Letzter Text', '', 0);
         $this->RegisterVariableString('LastAudioURL', 'Letzte Audio-URL', '', 0);
+
+        // Register webhook hook (called once at instance creation).
+        // ProcessHookData() handles all requests to this hook.
+        // Safe-guarded: RegisterHook requires IPS 5.2+ with Connect configured.
+        $this->RegisterWebhookIfAvailable();
     }
 
     public function ApplyChanges(): void
@@ -56,19 +61,36 @@ class UltimateVoiceDevice extends IPSModule
         parent::ApplyChanges();
 
         $serverURL = $this->ReadPropertyString('ServerURL');
-        $mode      = $this->ReadPropertyString('DeliveryMode');
 
         if (empty($serverURL)) {
             $this->SetStatus(104); // error: server URL missing
             return;
         }
 
-        // Register webhook for free-tier delivery
-        if ($mode === 'webhook') {
-            $this->RegisterHook('/hook/uv_' . $this->InstanceID);
-        }
+        // Re-register webhook in case it was lost (e.g. after module update)
+        $this->RegisterWebhookIfAvailable();
 
         $this->SetStatus(102); // active
+    }
+
+    /**
+     * Register the IPMagic webhook, if RegisterHook() is available in this
+     * IPS version (requires IPS 5.2+ with IPS Connect enabled).
+     */
+    private function RegisterWebhookIfAvailable(): void
+    {
+        if (!method_exists($this, 'RegisterHook')) {
+            $this->LogMessage(
+                'UV: RegisterHook() nicht verfügbar — IPS Connect aktivieren oder IPS aktualisieren (mind. 5.2). Webhook-Modus deaktiviert.',
+                KL_WARNING
+            );
+            return;
+        }
+        try {
+            $this->RegisterHook('/hook/uv_' . $this->InstanceID);
+        } catch (Throwable $e) {
+            $this->LogMessage('UV: Webhook-Registrierung fehlgeschlagen: ' . $e->getMessage(), KL_WARNING);
+        }
     }
 
     // =========================================================================
