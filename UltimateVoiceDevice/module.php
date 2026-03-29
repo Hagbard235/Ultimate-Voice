@@ -242,11 +242,15 @@ class UltimateVoiceDevice extends IPSModule
             $this->SendDebug('Webhook', "Hook registriert: $hookPath → #$scriptID", 0);
             $this->LogMessage("UV: Hook registriert: $hookPath", KL_MESSAGE);
 
-            // Show the public URL in the log for easy verification
+            // Show the public URL in both debug and log for easy verification
             if (function_exists('IPS_GetConnectUrl')) {
                 $connectURL = rtrim(IPS_GetConnectUrl(), '/');
                 if (!empty($connectURL)) {
-                    $this->LogMessage("UV: Webhook erreichbar unter: $connectURL$hookPath?id={uuid}&char={charId}", KL_MESSAGE);
+                    $fullURL = "$connectURL$hookPath?id={uuid}&char={charId}";
+                    $this->SendDebug('Webhook', "Öffentliche URL: $fullURL", 0);
+                    $this->LogMessage("UV: Webhook erreichbar unter: $fullURL", KL_MESSAGE);
+                } else {
+                    $this->SendDebug('Webhook', 'IPS Connect URL ist leer — Connect aktiv?', 0);
                 }
             }
         } else {
