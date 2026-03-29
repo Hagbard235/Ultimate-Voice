@@ -233,6 +233,10 @@ class UltimateVoiceDevice extends IPSModule
         }
 
         $index = $this->LoadLocalIndex();
+        // Alte Datei aus /user/ löschen wenn sich die file_id geändert hat
+        if (isset($index[$EventType]) && $index[$EventType]['file_id'] !== $fileId) {
+            $this->DeleteUserDirFile($index[$EventType]['file_id']);
+        }
         $index[$EventType] = ['file_id' => $fileId, 'path' => $localFile];
         $this->SaveLocalIndex($index);
         $this->SendDebug('LocalCache', "Index aktualisiert: $EventType → $fileId", 0);
@@ -515,6 +519,44 @@ class UltimateVoiceDevice extends IPSModule
      * Gibt die IPS Connect URL zurück (z.B. https://xxx.ipmagic.de).
      * Verwendet CC_GetURL() über die Connect Control Instanz.
      */
+    /**
+     * Kompletten lokalen Cache leeren: Index + alle Dateien aus /user/ und Cache-Dir.
+     */
+    public function ClearCache(): string
+    {
+        $index   = $this->LoadLocalIndex();
+        $deleted = 0;
+
+        foreach ($index as $eventType => $entry) {
+            // Aus /user/ löschen
+            $this->DeleteUserDirFile($entry['file_id']);
+            // Aus Cache-Dir löschen
+            $cachePath = $this->GetCacheDir() . DIRECTORY_SEPARATOR . $entry['file_id'] . '.mp3';
+            if (file_exists($cachePath)) {
+                unlink($cachePath);
+            }
+            $deleted++;
+        }
+
+        // Index leeren
+        $this->SaveLocalIndex([]);
+        $this->SendDebug('ClearCache', "Geleert — $deleted Einträge entfernt", 0);
+        $this->LogMessage("UV: Lokaler Cache geleert ($deleted Dateien)", KL_MESSAGE);
+        return "✅ Cache geleert — $deleted Dateien entfernt.";
+    }
+
+    /**
+     * Löscht eine uv_{fileId}.mp3 aus dem IPS /user/-Verzeichnis.
+     */
+    private function DeleteUserDirFile(string $fileId): void
+    {
+        $path = IPS_GetKernelDir() . 'user' . DIRECTORY_SEPARATOR . 'uv_' . $fileId . '.mp3';
+        if (file_exists($path)) {
+            unlink($path);
+            $this->SendDebug('DeleteFile', "Gelöscht: $path", 0);
+        }
+    }
+
     private function GetConnectURL(): string
     {
         $ids = IPS_GetInstanceListByModuleID('{9486D575-BE8C-4ED8-B5B5-20930E26DE6F}');

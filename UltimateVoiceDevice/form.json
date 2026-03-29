@@ -98,6 +98,11 @@
                     "type": "Button",
                     "caption": "Webhook Status prüfen",
                     "onClick": "echo UVD_GetWebhookStatus($id);"
+                },
+                {
+                    "type": "Button",
+                    "caption": "Lokalen Cache leeren",
+                    "onClick": "echo UVD_ClearCache($id);"
                 }
             ]
         }
