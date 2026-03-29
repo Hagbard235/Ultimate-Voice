@@ -54,22 +54,26 @@ class UltimateVoiceDevice extends IPSModule
             return;
         }
 
-        // Webhook immer registrieren — ProcessHookData() ignoriert Anfragen
-        // einfach wenn DeliveryMode nicht 'webhook' ist.
+        // Webhook registrieren — ProcessHookData() liefert die MP3 an Alexa aus
         $hookPath = '/hook/uv_' . $this->InstanceID;
-        $this->RegisterHook($hookPath);
-        $this->SendDebug('Webhook', "Hook registriert: $hookPath", 0);
+        try {
+            $this->RegisterHook($hookPath);
+            $this->SendDebug('Webhook', "Hook registriert: $hookPath", 0);
+            $this->LogMessage("UV: Hook registriert: $hookPath", KL_MESSAGE);
 
-        // Öffentliche URL ausgeben sobald Connect-URL bekannt ist
-        if (function_exists('IPS_GetConnectUrl')) {
-            $connectURL = rtrim(IPS_GetConnectUrl(), '/');
-            if (!empty($connectURL)) {
-                $exampleURL = "$connectURL$hookPath?id={uuid}&char=$characterId";
-                $this->SendDebug('Webhook', "Öffentliche URL: $exampleURL", 0);
-                $this->LogMessage("UV: Webhook-URL: $exampleURL", KL_MESSAGE);
-            } else {
-                $this->SendDebug('Webhook', 'IPS Connect URL noch leer (Connect aktiv?)', 0);
+            if (function_exists('IPS_GetConnectUrl')) {
+                $connectURL = rtrim(IPS_GetConnectUrl(), '/');
+                if (!empty($connectURL)) {
+                    $exampleURL = "$connectURL$hookPath?id={uuid}&char=$characterId";
+                    $this->SendDebug('Webhook', "Öffentliche URL: $exampleURL", 0);
+                    $this->LogMessage("UV: Webhook-URL: $exampleURL", KL_MESSAGE);
+                } else {
+                    $this->SendDebug('Webhook', 'Connect URL leer — Connect aktiv?', 0);
+                }
             }
+        } catch (\Throwable $e) {
+            $this->SendDebug('Webhook', 'RegisterHook fehlgeschlagen: ' . $e->getMessage(), 0);
+            $this->LogMessage('UV: RegisterHook fehlgeschlagen — WebHook Control in IPS aktiv? ' . $e->getMessage(), KL_WARNING);
         }
 
         $this->SetStatus(102);
