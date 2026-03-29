@@ -10,7 +10,7 @@
                     "type": "ValidationTextBox",
                     "caption": "Server URL",
                     "width": "400px",
-                    "value": "http://localhost:8000"
+                    "value": "https://voice.smarthome-services.xyz"
                 },
                 {
                     "name": "APIKey",

@@ -26,7 +26,7 @@ class UltimateVoiceDevice extends IPSModule
     {
         parent::Create();
 
-        $this->RegisterPropertyString('ServerURL',     'http://localhost:8000');
+        $this->RegisterPropertyString('ServerURL',     'https://voice.smarthome-services.xyz');
         $this->RegisterPropertyString('APIKey',        '');
         $this->RegisterPropertyString('CharacterID',   'butler_de');
         $this->RegisterPropertyString('DeliveryMode',  'webhook');
@@ -61,8 +61,8 @@ class UltimateVoiceDevice extends IPSModule
             $this->SendDebug('Webhook', "Hook registriert: $hookPath", 0);
             $this->LogMessage("UV: Hook registriert: $hookPath", KL_MESSAGE);
 
-            if (function_exists('IPS_GetConnectUrl')) {
-                $connectURL = rtrim(IPS_GetConnectUrl(), '/');
+            if (IPS_ModuleExists('{9486D575-EE8C-40D7-9051-7E30E223C581}')) {
+                $connectURL = $this->GetConnectURL();
                 if (!empty($connectURL)) {
                     $exampleURL = "$connectURL$hookPath?id={uuid}&char=$characterId";
                     $this->SendDebug('Webhook', "Öffentliche URL: $exampleURL", 0);
@@ -226,7 +226,7 @@ class UltimateVoiceDevice extends IPSModule
         $warnings = [];
         if (empty($serverURL))  $warnings[] = 'Server URL fehlt';
         if ($echoId <= 0)       $warnings[] = 'EchoRemote Instanz nicht gesetzt';
-        if ($mode === 'webhook' && function_exists('IPS_GetConnectUrl') && empty(IPS_GetConnectUrl())) {
+        if ($mode === 'webhook' && IPS_ModuleExists('{9486D575-EE8C-40D7-9051-7E30E223C581}') && empty($this->GetConnectURL())) {
             $warnings[] = 'IPS Connect URL ist leer';
         }
 
@@ -252,13 +252,13 @@ class UltimateVoiceDevice extends IPSModule
 
     private function AnnounceViaWebhook(string $fileId): bool
     {
-        if (!function_exists('IPS_GetConnectUrl')) {
-            $this->SendDebug('Announce', 'FEHLER: IPS_GetConnectUrl() nicht vorhanden', 0);
-            $this->LogMessage('UV: IPS_GetConnectUrl() nicht verfügbar.', KL_ERROR);
+        if (!IPS_ModuleExists('{9486D575-EE8C-40D7-9051-7E30E223C581}')) {
+            $this->SendDebug('Announce', 'FEHLER: Connect Control Modul nicht gefunden', 0);
+            $this->LogMessage('UV: Connect Control nicht verfügbar.', KL_ERROR);
             return false;
         }
 
-        $connectBase = rtrim(IPS_GetConnectUrl(), '/');
+        $connectBase = $this->GetConnectURL();
         if (empty($connectBase)) {
             $this->SendDebug('Announce', 'FEHLER: Connect URL leer', 0);
             $this->LogMessage('UV: IPS Connect URL leer — Connect aktiv?', KL_ERROR);
@@ -394,6 +394,29 @@ class UltimateVoiceDevice extends IPSModule
             $dir . DIRECTORY_SEPARATOR . self::INDEX_FILENAME,
             json_encode($index, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)
         );
+    }
+
+    /**
+     * Gibt die IPS Connect URL zurück (z.B. https://xxx.ipmagic.de).
+     * Verwendet CC_GetURL() über die Connect Control Instanz.
+     */
+    private function GetConnectURL(): string
+    {
+        $moduleGUID = '{9486D575-EE8C-40D7-9051-7E30E223C581}';
+        $ids = IPS_GetInstanceListByModuleID($moduleGUID);
+        if (empty($ids)) {
+            $this->SendDebug('Connect', 'Keine Connect Control Instanz gefunden', 0);
+            return '';
+        }
+        $connectID = $ids[0];
+        $instance  = IPS_GetInstance($connectID);
+        if ($instance['InstanceStatus'] != 102) {
+            $this->SendDebug('Connect', "Connect Instanz #$connectID nicht aktiv (Status: {$instance['InstanceStatus']})", 0);
+            return '';
+        }
+        $url = CC_GetURL($connectID);
+        $this->SendDebug('Connect', "URL: $url (Instanz #$connectID)", 0);
+        return rtrim($url, '/');
     }
 
     private function GetCacheDir(): string
