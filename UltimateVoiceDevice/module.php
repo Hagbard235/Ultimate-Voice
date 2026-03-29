@@ -517,43 +517,12 @@ class UltimateVoiceDevice extends IPSModule
      */
     private function GetConnectURL(): string
     {
-        // IPS Connect Control — GUID ohne geschweifte Klammern probieren
-        $guids = [
-            '9486D575-EE8C-40D7-9051-7E30E223C581',
-            '{9486D575-EE8C-40D7-9051-7E30E223C581}',
-        ];
-
-        foreach ($guids as $guid) {
-            $ids = IPS_GetInstanceListByModuleID($guid);
-            if (!empty($ids)) {
-                $connectID = $ids[0];
-                $instance  = IPS_GetInstance($connectID);
-                $this->SendDebug('Connect', "Instanz #$connectID gefunden (GUID: $guid, Status: {$instance['InstanceStatus']})", 0);
-                if ($instance['InstanceStatus'] != 102) {
-                    $this->SendDebug('Connect', "Instanz nicht aktiv", 0);
-                    return '';
-                }
-                $url = CC_GetURL($connectID);
-                $this->SendDebug('Connect', "URL: $url", 0);
-                return rtrim($url, '/');
-            }
+        $ids = IPS_GetInstanceListByModuleID('{9486D575-BE8C-4ED8-B5B5-20930E26DE6F}');
+        if (count($ids) > 0) {
+            $url = CC_GetURL($ids[0]);
+            $this->SendDebug('Connect', "URL: $url (Instanz #{$ids[0]})", 0);
+            return rtrim($url, '/');
         }
-
-        // Fallback: alle Instanzen durchsuchen und nach CC_GetURL schauen
-        foreach (IPS_GetInstanceList() as $id) {
-            if (IPS_ObjectExists($id) && function_exists('CC_GetURL')) {
-                try {
-                    $url = @CC_GetURL($id);
-                    if (!empty($url) && strpos($url, 'ipmagic.de') !== false) {
-                        $this->SendDebug('Connect', "URL via Fallback-Suche gefunden: $url (Instanz #$id)", 0);
-                        return rtrim($url, '/');
-                    }
-                } catch (\Throwable $e) {
-                    // nicht die richtige Instanz
-                }
-            }
-        }
-
         $this->SendDebug('Connect', 'Keine Connect Control Instanz gefunden', 0);
         return '';
     }
