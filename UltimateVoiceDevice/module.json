@@ -6,6 +6,6 @@
     "aliases": ["UltimateVoiceDevice", "Ultimate Voice"],
     "parentRequirements": [],
     "childRequirements": [],
-    "implemented": ["WebHook"],
+    "implemented": [],
     "prefix": "UVD"
 }
