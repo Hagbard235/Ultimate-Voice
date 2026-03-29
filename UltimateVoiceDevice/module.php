@@ -16,43 +16,32 @@
  *     1. POST {ServerURL}/v1/poc/generate  → { audio_url, … }
  *     2. EchoRemote SSML <audio src="…"/>  with audio_url directly
  *        (Alexa fetches from voice.smarthome-services.xyz)
- *        No local download, no FTP, no webhook needed.
+ *        No local download, no webhook needed.
  *
  * The module never touches OpenAI or ElevenLabs directly.
  * All AI/voice generation happens on the Ultimate Voice server.
+ *
+ * Debug: Right-click instance → Debug  (shows SendDebug output in real time)
+ * Log:   IPS Log viewer  (shows LogMessage output)
  */
 class UltimateVoiceDevice extends IPSModule
 {
-    // Lookup: local UUID → audio path
     private const INDEX_FILENAME = 'uv_index.json';
 
     public function Create(): void
     {
         parent::Create();
 
-        // --- Server connection ---
-        $this->RegisterPropertyString('ServerURL', 'http://localhost:8000');
-        $this->RegisterPropertyString('APIKey', '');
-        $this->RegisterPropertyString('CharacterID', 'butler_de');
-
-        // --- Delivery mode ---
-        // 'webhook'  → FREE:    download locally, serve via IPMagic webhook to Alexa
-        // 'direct'   → PREMIUM: Alexa fetches directly from the Ultimate Voice server
+        $this->RegisterPropertyString('ServerURL',    'http://localhost:8000');
+        $this->RegisterPropertyString('APIKey',       '');
+        $this->RegisterPropertyString('CharacterID',  'butler_de');
         $this->RegisterPropertyString('DeliveryMode', 'webhook');
-
-        // --- Audio output ---
         $this->RegisterPropertyInteger('EchoRemoteID', 0);
-
-        // --- Test button helper ---
         $this->RegisterPropertyString('TestEventType', 'doorbell');
 
-        // --- State variables ---
         $this->RegisterVariableString('LastSpokenText', 'Letzter Text', '', 0);
-        $this->RegisterVariableString('LastAudioURL', 'Letzte Audio-URL', '', 0);
+        $this->RegisterVariableString('LastAudioURL',   'Letzte Audio-URL', '', 0);
 
-        // Register webhook hook (called once at instance creation).
-        // ProcessHookData() handles all requests to this hook.
-        // Safe-guarded: RegisterHook requires IPS 5.2+ with Connect configured.
         $this->RegisterWebhookIfAvailable();
     }
 
@@ -60,37 +49,22 @@ class UltimateVoiceDevice extends IPSModule
     {
         parent::ApplyChanges();
 
-        $serverURL = $this->ReadPropertyString('ServerURL');
+        $serverURL   = $this->ReadPropertyString('ServerURL');
+        $characterId = $this->ReadPropertyString('CharacterID');
+        $mode        = $this->ReadPropertyString('DeliveryMode');
+        $echoId      = $this->ReadPropertyInteger('EchoRemoteID');
+
+        $this->SendDebug('ApplyChanges', "ServerURL=$serverURL | CharacterID=$characterId | DeliveryMode=$mode | EchoRemoteID=$echoId", 0);
 
         if (empty($serverURL)) {
-            $this->SetStatus(104); // error: server URL missing
+            $this->LogMessage('UV: Server URL ist nicht konfiguriert.', KL_ERROR);
+            $this->SetStatus(104);
             return;
         }
 
-        // Re-register webhook in case it was lost (e.g. after module update)
         $this->RegisterWebhookIfAvailable();
-
-        $this->SetStatus(102); // active
-    }
-
-    /**
-     * Register the IPMagic webhook, if RegisterHook() is available in this
-     * IPS version (requires IPS 5.2+ with IPS Connect enabled).
-     */
-    private function RegisterWebhookIfAvailable(): void
-    {
-        if (!method_exists($this, 'RegisterHook')) {
-            $this->LogMessage(
-                'UV: RegisterHook() nicht verfügbar — IPS Connect aktivieren oder IPS aktualisieren (mind. 5.2). Webhook-Modus deaktiviert.',
-                KL_WARNING
-            );
-            return;
-        }
-        try {
-            $this->RegisterHook('/hook/uv_' . $this->InstanceID);
-        } catch (Throwable $e) {
-            $this->LogMessage('UV: Webhook-Registrierung fehlgeschlagen: ' . $e->getMessage(), KL_WARNING);
-        }
+        $this->SetStatus(102);
+        $this->SendDebug('ApplyChanges', 'Status: aktiv (102)', 0);
     }
 
     // =========================================================================
@@ -98,17 +72,9 @@ class UltimateVoiceDevice extends IPSModule
     // =========================================================================
 
     /**
-     * Main method: request audio from server, cache locally (free) or play
-     * directly (premium).
+     * Main entry point — called from IPS scripts or event actions.
      *
-     * Usage in IPS scripts:
-     *   UVD_Speak($instanceId, 'doorbell');
-     *   UVD_Speak($instanceId, 'battery_low');
-     *
-     * @param string $EventType  One of: doorbell, battery_low, washer_done,
-     *                           window_open, motion_detected, welcome, goodbye,
-     *                           temperature_alert, rain_alert, timer_done
-     * @return bool  true on success
+     * Usage:  UVD_Speak($id, 'doorbell');
      */
     public function Speak(string $EventType): bool
     {
@@ -117,104 +83,175 @@ class UltimateVoiceDevice extends IPSModule
         $characterId = $this->ReadPropertyString('CharacterID');
         $mode        = $this->ReadPropertyString('DeliveryMode');
 
+        $this->SendDebug('Speak', "EventType=$EventType | CharacterID=$characterId | DeliveryMode=$mode", 0);
+        $this->LogMessage("UV: Speak('$EventType') gestartet. Modus=$mode, Charakter=$characterId", KL_MESSAGE);
+
         if (empty($serverURL)) {
+            $this->SendDebug('Speak', 'FEHLER: Server URL nicht konfiguriert', 0);
             $this->LogMessage('UV: Server URL ist nicht konfiguriert.', KL_ERROR);
             return false;
         }
 
-        // --- Step 1: Check local cache (webhook mode only) ---
+        // --- Step 1: Local cache check (webhook mode only) ---
         if ($mode === 'webhook') {
             $index  = $this->LoadLocalIndex();
             $cached = $index[$EventType] ?? null;
+            $this->SendDebug('LocalCache', "event=$EventType | entry=" . ($cached ? json_encode($cached) : 'nicht vorhanden'), 0);
+
             if ($cached && file_exists($cached['path'])) {
-                $this->LogMessage("UV: Lokaler Cache-Hit für '$EventType'.", KL_MESSAGE);
+                $this->SendDebug('LocalCache', 'Hit! Datei vorhanden: ' . $cached['path'], 0);
+                $this->LogMessage("UV: Lokaler Cache-Hit für '$EventType': " . $cached['path'], KL_MESSAGE);
                 return $this->AnnounceViaWebhook($cached['file_id']);
             }
+
+            $this->SendDebug('LocalCache', 'Miss — Server wird angefragt', 0);
         }
 
         // --- Step 2: Request from server ---
+        $this->SendDebug('ServerRequest', "POST $serverURL/v1/poc/generate | character=$characterId | event=$EventType", 0);
         $response = $this->RequestGenerate($serverURL, $apiKey, $characterId, $EventType);
+
         if ($response === false) {
+            $this->SendDebug('ServerRequest', 'FEHLER: Kein Ergebnis vom Server', 0);
             $this->LogMessage("UV: Server-Aufruf fehlgeschlagen für '$EventType'.", KL_ERROR);
             return false;
         }
 
-        $this->LogMessage("UV: Text: " . $response['text'] . " | cached=" . ($response['from_cache'] ? 'ja' : 'nein'), KL_MESSAGE);
+        $this->SendDebug('ServerRequest', 'Antwort: ' . json_encode($response), 0);
+        $this->LogMessage(
+            "UV: Server OK — text=\"{$response['text']}\" | from_cache=" . ($response['from_cache'] ? 'ja' : 'nein') . " | file_id={$response['file_id']}",
+            KL_MESSAGE
+        );
+
         $this->SetValue('LastSpokenText', $response['text']);
         $this->SetValue('LastAudioURL',   $response['audio_url']);
 
         // --- Step 3: Deliver ---
         if ($mode === 'direct') {
-            // Premium: pass server URL directly to Alexa — no local download
+            $this->SendDebug('Deliver', 'Modus: direct — URL direkt an Alexa: ' . $response['audio_url'], 0);
             return $this->AnnounceViaDirect($response['audio_url']);
         }
 
-        // Free tier: download → local cache → webhook
-        $fileId   = $response['file_id'];
-        $localDir = $this->GetCacheDir();
+        // Webhook mode: download → local cache → webhook URL
+        $fileId    = $response['file_id'];
+        $localDir  = $this->GetCacheDir();
         $localFile = $localDir . DIRECTORY_SEPARATOR . $fileId . '.mp3';
 
+        $this->SendDebug('Deliver', "Modus: webhook | file_id=$fileId | localFile=$localFile", 0);
+
         if (!file_exists($localFile) || !$response['from_cache']) {
-            // Download (or re-download if server regenerated)
+            $this->SendDebug('Download', 'Starte Download: ' . $response['audio_url'], 0);
             $audioData = $this->DownloadAudio($response['audio_url'], $apiKey);
+
             if ($audioData === false) {
+                $this->SendDebug('Download', 'FEHLER: Download fehlgeschlagen', 0);
                 $this->LogMessage('UV: Download der Audio-Datei fehlgeschlagen.', KL_ERROR);
                 return false;
             }
+
             if (!is_dir($localDir)) {
                 mkdir($localDir, 0755, true);
+                $this->SendDebug('Download', "Verzeichnis erstellt: $localDir", 0);
             }
+
             file_put_contents($localFile, $audioData);
-            $this->LogMessage("UV: Audio gespeichert: $localFile", KL_MESSAGE);
+            $this->SendDebug('Download', 'Gespeichert: ' . $localFile . ' (' . strlen($audioData) . ' Bytes)', 0);
+            $this->LogMessage("UV: Audio gespeichert ($localFile, " . strlen($audioData) . " Bytes)", KL_MESSAGE);
+        } else {
+            $this->SendDebug('Download', 'Übersprungen — Datei bereits lokal vorhanden: ' . $localFile, 0);
         }
 
         // Update local index
         $index = $this->LoadLocalIndex();
         $index[$EventType] = ['file_id' => $fileId, 'path' => $localFile];
         $this->SaveLocalIndex($index);
+        $this->SendDebug('LocalCache', "Index aktualisiert: $EventType → $fileId", 0);
 
         return $this->AnnounceViaWebhook($fileId);
     }
 
     /**
-     * Test button handler — callable from IPS configuration UI.
+     * Test button handler — shows step-by-step result in IPS config dialog.
      */
     public function TestSpeak(): string
     {
-        $eventType = $this->ReadPropertyString('TestEventType');
-        $ok        = $this->Speak($eventType);
-        return $ok
-            ? "✅ Erfolg! Echo-Announce gesendet."
-            : '❌ Fehler — Bitte Logs prüfen (IPS Log-Ansicht).';
+        $eventType   = $this->ReadPropertyString('TestEventType');
+        $mode        = $this->ReadPropertyString('DeliveryMode');
+        $serverURL   = $this->ReadPropertyString('ServerURL');
+        $characterId = $this->ReadPropertyString('CharacterID');
+        $echoId      = $this->ReadPropertyInteger('EchoRemoteID');
+
+        $this->SendDebug('TestSpeak', "event=$eventType | mode=$mode | server=$serverURL | char=$characterId | echo=$echoId", 0);
+
+        // Pre-flight checks — give user direct feedback before even trying
+        $warnings = [];
+        if (empty($serverURL)) {
+            $warnings[] = 'Server URL fehlt';
+        }
+        if ($echoId <= 0) {
+            $warnings[] = 'EchoRemote Instanz nicht gesetzt';
+        }
+        if ($mode === 'webhook' && function_exists('IPS_GetConnectUrl')) {
+            $connectURL = IPS_GetConnectUrl();
+            if (empty($connectURL)) {
+                $warnings[] = 'IPS Connect URL ist leer (Connect aktiviert?)';
+            }
+        }
+        if ($mode === 'webhook' && !method_exists($this, 'RegisterHook')) {
+            $warnings[] = 'RegisterHook() nicht verfügbar (IPS zu alt / Connect nicht aktiv)';
+        }
+
+        if (!empty($warnings)) {
+            $msg = '⚠️ Konfigurationsprobleme:' . "\n" . implode("\n", array_map(fn($w) => "  • $w", $warnings));
+            $this->SendDebug('TestSpeak', $msg, 0);
+            return $msg;
+        }
+
+        $ok = $this->Speak($eventType);
+
+        if ($ok) {
+            $lastURL  = $this->GetValue('LastAudioURL');
+            $lastText = $this->GetValue('LastSpokenText');
+            return "✅ Erfolg!\n\nText: $lastText\nURL: $lastURL\n\nBitte Echo-Gerät beobachten.";
+        }
+
+        return "❌ Fehlgeschlagen — Details in:\n• IPS Log-Ansicht\n• Rechtsklick auf Instanz → Debug";
     }
 
     // =========================================================================
-    // Webhook handler — called by IPS when Alexa GETs the webhook URL
+    // Webhook handler — IPS calls this when Alexa GETs the IPMagic URL
     // =========================================================================
 
-    /**
-     * IPMagic webhook: Alexa calls
-     *   https://{hash}.ipmagic.de/hook/uv_{InstanceID}?id={uuid}
-     * and receives the local MP3 as audio/mpeg.
-     */
     public function ProcessHookData(): void
     {
+        $this->SendDebug('ProcessHookData', 'Eingehende Anfrage: ' . json_encode($_GET), 0);
+
         $fileId = isset($_GET['id']) ? preg_replace('/[^a-f0-9\-]/', '', $_GET['id']) : '';
+
         if (empty($fileId)) {
+            $this->SendDebug('ProcessHookData', 'FEHLER: id-Parameter fehlt oder ungültig', 0);
             http_response_code(400);
-            echo 'Missing id parameter';
+            echo 'Missing or invalid id parameter';
             return;
         }
 
         $localFile = $this->GetCacheDir() . DIRECTORY_SEPARATOR . $fileId . '.mp3';
+        $this->SendDebug('ProcessHookData', "Suche Datei: $localFile", 0);
+
         if (!file_exists($localFile)) {
+            $this->SendDebug('ProcessHookData', 'FEHLER: Datei nicht gefunden', 0);
+            $this->LogMessage("UV: Webhook angefragt aber Datei nicht gefunden: $localFile", KL_WARNING);
             http_response_code(404);
             echo 'Audio file not found';
             return;
         }
 
+        $size = filesize($localFile);
+        $this->SendDebug('ProcessHookData', "Liefere $localFile ($size Bytes) als audio/mpeg", 0);
+        $this->LogMessage("UV: Webhook liefert $fileId.mp3 ($size Bytes)", KL_MESSAGE);
+
         header('Content-Type: audio/mpeg');
-        header('Content-Length: ' . filesize($localFile));
+        header('Content-Length: ' . $size);
         header('Cache-Control: public, max-age=86400');
         readfile($localFile);
     }
@@ -223,9 +260,23 @@ class UltimateVoiceDevice extends IPSModule
     // Private helpers
     // =========================================================================
 
-    /**
-     * POST /v1/poc/generate and return decoded JSON response, or false on error.
-     */
+    private function RegisterWebhookIfAvailable(): void
+    {
+        if (!method_exists($this, 'RegisterHook')) {
+            $this->SendDebug('Webhook', 'RegisterHook() nicht verfügbar — Webhook-Modus nicht nutzbar', 0);
+            $this->LogMessage('UV: RegisterHook() nicht verfügbar. IPS Connect aktivieren (mind. IPS 5.2).', KL_WARNING);
+            return;
+        }
+        try {
+            $hookPath = '/hook/uv_' . $this->InstanceID;
+            $this->RegisterHook($hookPath);
+            $this->SendDebug('Webhook', "Registriert: $hookPath", 0);
+        } catch (Throwable $e) {
+            $this->SendDebug('Webhook', 'Registrierung fehlgeschlagen: ' . $e->getMessage(), 0);
+            $this->LogMessage('UV: Webhook-Registrierung fehlgeschlagen: ' . $e->getMessage(), KL_WARNING);
+        }
+    }
+
     private function RequestGenerate(
         string $serverURL,
         string $apiKey,
@@ -233,10 +284,9 @@ class UltimateVoiceDevice extends IPSModule
         string $eventType
     ): array|false {
         $url     = "$serverURL/v1/poc/generate";
-        $payload = json_encode([
-            'character_id' => $characterId,
-            'event_type'   => $eventType,
-        ]);
+        $payload = json_encode(['character_id' => $characterId, 'event_type' => $eventType]);
+
+        $this->SendDebug('HTTP', "POST $url", 0);
 
         $ch = curl_init($url);
         curl_setopt_array($ch, [
@@ -255,17 +305,21 @@ class UltimateVoiceDevice extends IPSModule
         $code  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
+        $this->SendDebug('HTTP', "HTTP $code | body=" . substr($body ?: '', 0, 300), 0);
+
         if ($error) {
+            $this->SendDebug('HTTP', "cURL-Fehler: $error", 0);
             $this->LogMessage("UV: cURL-Fehler: $error", KL_ERROR);
             return false;
         }
         if ($code !== 200) {
-            $this->LogMessage("UV: Server antwortete mit HTTP $code: " . substr($body, 0, 200), KL_ERROR);
+            $this->LogMessage("UV: Server HTTP $code: " . substr($body, 0, 200), KL_ERROR);
             return false;
         }
 
         $data = json_decode($body, true);
         if (!isset($data['audio_url'], $data['file_id'])) {
+            $this->SendDebug('HTTP', 'Unerwartetes Antwortformat: ' . $body, 0);
             $this->LogMessage('UV: Unerwartetes Server-Antwort-Format.', KL_ERROR);
             return false;
         }
@@ -273,24 +327,23 @@ class UltimateVoiceDevice extends IPSModule
         return $data;
     }
 
-    /**
-     * Download audio file from the given URL. Returns binary content or false.
-     */
     private function DownloadAudio(string $audioURL, string $apiKey): string|false
     {
+        $this->SendDebug('HTTP', "GET $audioURL", 0);
+
         $ch = curl_init($audioURL);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT        => 30,
-            CURLOPT_HTTPHEADER     => [
-                'Authorization: Bearer ' . $apiKey,
-            ],
+            CURLOPT_HTTPHEADER     => ['Authorization: Bearer ' . $apiKey],
         ]);
 
         $data  = curl_exec($ch);
         $error = curl_error($ch);
         $code  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+
+        $this->SendDebug('HTTP', "HTTP $code | " . ($error ?: strlen($data) . ' Bytes empfangen'), 0);
 
         if ($error || $code !== 200) {
             $this->LogMessage("UV: Download fehlgeschlagen (HTTP $code): $error", KL_ERROR);
@@ -300,58 +353,66 @@ class UltimateVoiceDevice extends IPSModule
         return $data;
     }
 
-    /**
-     * FREE TIER: Build webhook URL with UUID and send SSML to Echo.
-     * Alexa will call the IPMagic webhook URL, which triggers ProcessHookData().
-     */
     private function AnnounceViaWebhook(string $fileId): bool
     {
-        // IPS_GetConnectUrl() returns the IPMagic base URL, e.g.:
-        //   https://abcdef1234567890abcdef1234567890.ipmagic.de
         if (!function_exists('IPS_GetConnectUrl')) {
-            $this->LogMessage('UV: IPS Connect nicht verfügbar — kein IPMagic-URL.', KL_ERROR);
+            $this->SendDebug('Announce', 'FEHLER: IPS_GetConnectUrl() nicht vorhanden', 0);
+            $this->LogMessage('UV: IPS_GetConnectUrl() nicht verfügbar — IPS Connect aktiv?', KL_ERROR);
             return false;
         }
 
         $connectBase = rtrim(IPS_GetConnectUrl(), '/');
-        $hookName    = 'uv_' . $this->InstanceID;
-        $webhookURL  = "$connectBase/hook/$hookName?id=$fileId";
+        $this->SendDebug('Announce', "IPS Connect URL: $connectBase", 0);
 
+        if (empty($connectBase)) {
+            $this->SendDebug('Announce', 'FEHLER: Connect URL ist leer', 0);
+            $this->LogMessage('UV: IPS Connect URL ist leer — IPS Connect konfiguriert und aktiv?', KL_ERROR);
+            return false;
+        }
+
+        $hookName   = 'uv_' . $this->InstanceID;
+        $webhookURL = "$connectBase/hook/$hookName?id=$fileId";
+
+        $this->SendDebug('Announce', "Webhook-URL für Alexa: $webhookURL", 0);
         return $this->SendSSMLToEcho($webhookURL);
     }
 
-    /**
-     * PREMIUM TIER: Pass the server URL directly to Alexa.
-     * No local download, no webhook — Alexa fetches from voice.smarthome-services.xyz.
-     */
     private function AnnounceViaDirect(string $audioURL): bool
     {
+        $this->SendDebug('Announce', "Direkt-URL für Alexa: $audioURL", 0);
         return $this->SendSSMLToEcho($audioURL);
     }
 
-    /**
-     * Send SSML <audio> tag to the configured EchoRemote instance.
-     */
     private function SendSSMLToEcho(string $audioURL): bool
     {
         $echoId = $this->ReadPropertyInteger('EchoRemoteID');
-        if ($echoId <= 0 || !IPS_InstanceExists($echoId)) {
-            $this->LogMessage('UV: EchoRemote nicht konfiguriert — kein Announce möglich.', KL_WARNING);
+        $this->SendDebug('EchoRemote', "EchoRemoteID=$echoId", 0);
+
+        if ($echoId <= 0) {
+            $this->SendDebug('EchoRemote', 'FEHLER: EchoRemoteID nicht gesetzt (0)', 0);
+            $this->LogMessage('UV: EchoRemote Instanz nicht konfiguriert (ID=0).', KL_WARNING);
+            return false;
+        }
+
+        if (!IPS_InstanceExists($echoId)) {
+            $this->SendDebug('EchoRemote', "FEHLER: Instanz $echoId existiert nicht", 0);
+            $this->LogMessage("UV: EchoRemote Instanz $echoId existiert nicht.", KL_ERROR);
             return false;
         }
 
         $ssml = '<speak><audio src="' . htmlspecialchars($audioURL, ENT_XML1) . '"/></speak>';
+        $this->SendDebug('EchoRemote', "Sende SSML: $ssml", 0);
+
         EchoRemote_TextToSpeech($echoId, $ssml);
-        $this->LogMessage("UV: Echo-Announce: $audioURL", KL_MESSAGE);
+
+        $this->LogMessage("UV: Echo-Announce gesendet: $audioURL", KL_MESSAGE);
         return true;
     }
 
-    /**
-     * Load the local event_type → {file_id, path} index from disk.
-     */
     private function LoadLocalIndex(): array
     {
         $path = $this->GetCacheDir() . DIRECTORY_SEPARATOR . self::INDEX_FILENAME;
+        $this->SendDebug('Index', "Lade: $path | exists=" . (file_exists($path) ? 'ja' : 'nein'), 0);
         if (file_exists($path)) {
             $data = json_decode(file_get_contents($path), true);
             return is_array($data) ? $data : [];
@@ -359,9 +420,6 @@ class UltimateVoiceDevice extends IPSModule
         return [];
     }
 
-    /**
-     * Persist the local index to disk.
-     */
     private function SaveLocalIndex(array $index): void
     {
         $dir  = $this->GetCacheDir();
@@ -372,10 +430,6 @@ class UltimateVoiceDevice extends IPSModule
         file_put_contents($path, json_encode($index, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     }
 
-    /**
-     * Returns the local cache directory for this instance's character.
-     * e.g. /var/lib/symcon/media/ultimate_voice/butler_de/
-     */
     private function GetCacheDir(): string
     {
         return IPS_GetKernelDir() . 'media' . DIRECTORY_SEPARATOR
