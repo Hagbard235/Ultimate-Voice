@@ -214,6 +214,60 @@ class UltimateVoiceDevice extends IPSModule
         return $this->AnnounceViaWebhook($fileId);
     }
 
+    /**
+     * Diagnose-Button: Zeigt ob der Webhook tatsächlich registriert ist,
+     * welche Connect-URL verfügbar ist, und was IPS_GetHookList() zurückgibt.
+     */
+    public function GetWebhookStatus(): string
+    {
+        $hookPath = '/hook/uv_' . $this->InstanceID;
+        $lines    = ["=== Webhook-Diagnose (Instanz #{$this->InstanceID}) ===", ''];
+
+        // 1. Ist der Hook in der IPS-Hookliste?
+        if (function_exists('IPS_GetHookList')) {
+            $hooks = IPS_GetHookList();
+            $this->SendDebug('HookList', json_encode($hooks), 0);
+            $found = false;
+            foreach ($hooks as $hook) {
+                if (($hook['Hook'] ?? '') === $hookPath) {
+                    $found = true;
+                    $lines[] = "✅ Hook registriert: $hookPath → Instanz #{$hook['TargetID']}";
+                    break;
+                }
+            }
+            if (!$found) {
+                $lines[] = "❌ Hook NICHT in IPS_GetHookList(): $hookPath";
+                $lines[] = '   Alle Hooks: ' . implode(', ', array_column($hooks, 'Hook'));
+            }
+        } else {
+            $lines[] = '⚠️ IPS_GetHookList() nicht verfügbar';
+        }
+
+        // 2. Connect URL
+        $lines[] = '';
+        $connectURL = $this->GetConnectURL();
+        if (!empty($connectURL)) {
+            $lines[] = "✅ Connect URL: $connectURL";
+            $lines[] = "🔗 Vollständige Webhook-URL:";
+            $lines[] = "   $connectURL$hookPath?id={uuid}&char={charId}";
+        } else {
+            $lines[] = '❌ Connect URL nicht verfügbar';
+        }
+
+        // 3. RegisterHook nochmal probieren mit explizitem Feedback
+        $lines[] = '';
+        try {
+            $this->RegisterHook($hookPath);
+            $lines[] = '✅ RegisterHook() aufgerufen ohne Exception';
+        } catch (\Throwable $e) {
+            $lines[] = '❌ RegisterHook() Exception: ' . $e->getMessage();
+        }
+
+        $result = implode("\n", $lines);
+        $this->SendDebug('WebhookStatus', $result, 0);
+        return $result;
+    }
+
     public function TestSpeak(): string
     {
         $eventType = $this->ReadPropertyString('TestEventType');

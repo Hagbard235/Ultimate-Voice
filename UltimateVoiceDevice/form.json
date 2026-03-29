@@ -92,6 +92,11 @@
                     "type": "Button",
                     "caption": "Sprechen + Echo Announce",
                     "onClick": "UVD_TestSpeak($id);"
+                },
+                {
+                    "type": "Button",
+                    "caption": "Webhook Status prüfen",
+                    "onClick": "echo UVD_GetWebhookStatus($id);"
                 }
             ]
         }
