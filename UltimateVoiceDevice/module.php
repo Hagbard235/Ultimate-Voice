@@ -31,7 +31,6 @@ class UltimateVoiceDevice extends IPSModule
         $this->RegisterPropertyString('CharacterID',   'butler_de');
         $this->RegisterPropertyString('DeliveryMode',  'userdir');
         $this->RegisterPropertyInteger('EchoRemoteID', 0);
-        $this->RegisterPropertyString('TestEventType', 'doorbell');
 
         $this->RegisterVariableString('LastSpokenText', 'Letzter Text', '', 0);
         $this->RegisterVariableString('LastAudioURL',   'Letzte Audio-URL', '', 0);
@@ -301,9 +300,9 @@ class UltimateVoiceDevice extends IPSModule
         return $result;
     }
 
-    public function TestSpeak(): string
+    public function TestSpeak(string $EventType = ''): string
     {
-        $eventType = $this->ReadPropertyString('TestEventType');
+        $eventType = $EventType ?: $this->ReadPropertyString('TestEventType');
         $mode      = $this->ReadPropertyString('DeliveryMode');
         $serverURL = $this->ReadPropertyString('ServerURL');
         $echoId    = $this->ReadPropertyInteger('EchoRemoteID');
@@ -311,9 +310,10 @@ class UltimateVoiceDevice extends IPSModule
         $this->SendDebug('TestSpeak', "event=$eventType | mode=$mode | server=$serverURL | echo=$echoId", 0);
 
         $warnings = [];
+        if (empty($eventType))  $warnings[] = 'Kein Event-Typ ausgewählt';
         if (empty($serverURL))  $warnings[] = 'Server URL fehlt';
         if ($echoId <= 0)       $warnings[] = 'EchoRemote Instanz nicht gesetzt';
-        if ($mode === 'webhook' && IPS_ModuleExists('{9486D575-EE8C-40D7-9051-7E30E223C581}') && empty($this->GetConnectURL())) {
+        if (($mode === 'webhook' || $mode === 'userdir') && empty($this->GetConnectURL())) {
             $warnings[] = 'IPS Connect URL ist leer';
         }
 

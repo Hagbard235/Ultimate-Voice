@@ -48,7 +48,7 @@
                     "type": "Select",
                     "caption": "Auslieferungs-Modus",
                     "width": "350px",
-                    "value": "webhook",
+                    "value": "userdir",
                     "options": [
                         { "caption": "IPS /user/-Verzeichnis via Connect (Free)", "value": "userdir" },
                         { "caption": "Webhook via IPS Connect (experimentell)", "value": "webhook" },
@@ -57,7 +57,7 @@
                 },
                 {
                     "type": "Label",
-                    "caption": "Webhook: Alexa holt Audio via IPS Connect (IPMagic). IPS Connect muss aktiv sein.",
+                    "caption": "UserDir: MP3 im /user/-Verzeichnis, Alexa holt via IPMagic-URL.",
                     "italic": true
                 },
                 {
@@ -66,10 +66,13 @@
                     "italic": true
                 }
             ]
-        },
+        }
+    ],
+    "actions": [
         {
             "type": "ExpansionPanel",
             "caption": "Test",
+            "expanded": true,
             "items": [
                 {
                     "type": "Select",
@@ -92,7 +95,7 @@
                 {
                     "type": "Button",
                     "caption": "Sprechen + Echo Announce",
-                    "onClick": "UVD_TestSpeak($id);"
+                    "onClick": "echo UVD_TestSpeak($id, $TestEventType);"
                 },
                 {
                     "type": "Button",
@@ -105,8 +108,13 @@
                     "onClick": "echo UVD_ClearCache($id);"
                 }
             ]
+        },
+        {
+            "type": "Label",
+            "caption": "Direkte Nutzung in IPS-Skripten: UVD_Speak($instanzId, 'doorbell');",
+            "italic": true,
+            "bold": false
         }
     ],
-    "actions": [],
     "status": []
 }
