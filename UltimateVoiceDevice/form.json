@@ -71,6 +71,13 @@
             "expanded": true,
             "items": [
                 {
+                    "type": "ValidationTextBox",
+                    "name": "TestRoom",
+                    "caption": "Raum / Kontext (optional)",
+                    "width": "250px",
+                    "value": ""
+                },
+                {
                     "type": "Select",
                     "name": "TestEventType",
                     "caption": "Test-Event",
@@ -91,12 +98,12 @@
                 {
                     "type": "Button",
                     "caption": "Sprechen (Cache)",
-                    "onClick": "echo UVD_TestSpeak($id, $TestEventType);"
+                    "onClick": "echo UVD_Speak($id, $TestEventType, $TestRoom);"
                 },
                 {
                     "type": "Button",
                     "caption": "Neu generieren (LLM-Test)",
-                    "onClick": "echo UVD_ForceSpeak($id, $TestEventType);"
+                    "onClick": "echo UVD_ForceSpeak($id, $TestEventType, $TestRoom);"
                 },
                 {
                     "type": "Button",
@@ -112,7 +119,7 @@
         },
         {
             "type": "Label",
-            "caption": "Direkte Nutzung in IPS-Skripten: UVD_Speak($instanzId, 'doorbell');",
+            "caption": "Direkte Nutzung in IPS-Skripten: UVD_Speak($id, 'doorbell');  oder mit Raum: UVD_Speak($id, 'motion_detected', 'Garage');",
             "italic": true,
             "bold": false
         }

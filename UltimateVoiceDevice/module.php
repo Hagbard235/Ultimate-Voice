@@ -132,15 +132,23 @@ class UltimateVoiceDevice extends IPSModule
     // Public API
     // =========================================================================
 
-    public function Speak(string $EventType): bool
+    /**
+     * Spricht eine Phrase für das angegebene Event aus.
+     * @param string $EventType  Eines der bekannten Events (doorbell, welcome, …)
+     * @param string $Room       Optionaler Raum-/Kontext-String (z.B. "Wohnzimmer").
+     *                           Wenn angegeben, werden raum-spezifische Phrasen bevorzugt.
+     * Aufruf: UVD_Speak($id, 'doorbell');
+     *         UVD_Speak($id, 'motion_detected', 'Garage');
+     */
+    public function Speak(string $EventType, string $Room = ''): bool
     {
         $serverURL   = rtrim($this->ReadPropertyString('ServerURL'), '/');
         $apiKey      = $this->ReadPropertyString('APIKey');
         $characterId = $this->ReadPropertyString('CharacterID');
         $mode        = $this->ReadPropertyString('DeliveryMode');
 
-        $this->SendDebug('Speak', "EventType=$EventType | CharacterID=$characterId | DeliveryMode=$mode", 0);
-        $this->LogMessage("UV: Speak('$EventType') — Modus=$mode, Charakter=$characterId", KL_MESSAGE);
+        $this->SendDebug('Speak', "EventType=$EventType | Room=$Room | CharacterID=$characterId | DeliveryMode=$mode", 0);
+        $this->LogMessage("UV: Speak('$EventType'" . ($Room ? ", Raum='$Room'" : '') . ") — Modus=$mode, Charakter=$characterId", KL_MESSAGE);
 
         if (empty($serverURL)) {
             $this->SendDebug('Speak', 'FEHLER: Server URL nicht konfiguriert', 0);
@@ -149,10 +157,13 @@ class UltimateVoiceDevice extends IPSModule
         }
 
         // --- Step 1: Lokaler Cache-Check (webhook + userdir) ---
+        // Cache-Key: eventType + optionaler Raum → raum-spezifische Phrasen separat gecacht
+        $cacheKey = $Room ? "{$EventType}::{$Room}" : $EventType;
         if ($mode === 'webhook' || $mode === 'userdir') {
             $index  = $this->LoadLocalIndex();
-            $cached = $index[$EventType] ?? null;
-            $this->SendDebug('LocalCache', "event=$EventType | entry=" . ($cached ? json_encode($cached) : 'nicht vorhanden'), 0);
+            // Raum-spezifisch suchen, bei Miss auf allgemein zurückfallen
+            $cached = $index[$cacheKey] ?? $index[$EventType] ?? null;
+            $this->SendDebug('LocalCache', "cacheKey=$cacheKey | entry=" . ($cached ? json_encode($cached) : 'nicht vorhanden'), 0);
 
             if ($cached) {
                 $fileId      = $cached['file_id'];
@@ -188,8 +199,8 @@ class UltimateVoiceDevice extends IPSModule
         }
 
         // --- Step 2: Server anfragen ---
-        $this->SendDebug('ServerRequest', "GET $serverURL/v1/characters/$characterId/play/$EventType", 0);
-        $response = $this->RequestGenerate($serverURL, $apiKey, $characterId, $EventType);
+        $this->SendDebug('ServerRequest', "GET $serverURL/v1/characters/$characterId/play/$EventType room=$Room", 0);
+        $response = $this->RequestGenerate($serverURL, $apiKey, $characterId, $EventType, false, $Room);
 
         if ($response === false) {
             $this->SendDebug('ServerRequest', 'FEHLER: Kein Ergebnis', 0);
@@ -241,13 +252,14 @@ class UltimateVoiceDevice extends IPSModule
         // Dateien werden nur gelöscht wenn der Server sie explizit deprecatet
         // (künftiger Sync-Endpunkt) oder via manuellem ClearCache()-Button.
         $index = $this->LoadLocalIndex();
-        $index[$EventType] = [
+        $index[$cacheKey] = [
             'file_id' => $fileId,
             'path'    => $localFile,
             'text'    => $response['text'] ?? '',
+            'room'    => $Room ?: null,
         ];
         $this->SaveLocalIndex($index);
-        $this->SendDebug('LocalCache', "Index aktualisiert: $EventType → $fileId", 0);
+        $this->SendDebug('LocalCache', "Index aktualisiert: $cacheKey → $fileId", 0);
 
         if ($mode === 'userdir') {
             return $this->AnnounceViaUserDir($fileId);
@@ -260,25 +272,29 @@ class UltimateVoiceDevice extends IPSModule
      * für dieses Event wird gelöscht, Server ignoriert seinen Cache ebenfalls.
      * Nützlich zum Testen neuer Textvarianten.
      * Aufruf: UVD_ForceSpeak($instanzId, 'doorbell');
+     *         UVD_ForceSpeak($instanzId, 'motion_detected', 'Garten');
      */
-    public function ForceSpeak(string $EventType): bool
+    public function ForceSpeak(string $EventType, string $Room = ''): bool
     {
-        $this->SendDebug('ForceSpeak', "Erzwinge Neu-Generierung für: $EventType", 0);
+        $this->SendDebug('ForceSpeak', "Erzwinge Neu-Generierung für: $EventType | Room=$Room", 0);
 
-        // Lokalen Cache-Eintrag für dieses Event löschen
+        $cacheKey = $Room ? "{$EventType}::{$Room}" : $EventType;
+
+        // Lokalen Cache-Eintrag für dieses Event/Raum löschen
         $index = $this->LoadLocalIndex();
-        if (isset($index[$EventType])) {
-            $fileId = $index[$EventType]['file_id'] ?? '';
-            if ($fileId) {
-                $this->DeleteUserDirFile($fileId);
-                $cachePath = $this->GetCacheDir() . DIRECTORY_SEPARATOR . $fileId . '.mp3';
-                if (file_exists($cachePath)) unlink($cachePath);
-                $this->SendDebug('ForceSpeak', "Lokale Datei gelöscht: $fileId", 0);
+        foreach ([$cacheKey, $EventType] as $key) {
+            if (isset($index[$key])) {
+                $fileId = $index[$key]['file_id'] ?? '';
+                if ($fileId) {
+                    $this->DeleteUserDirFile($fileId);
+                    $cachePath = $this->GetCacheDir() . DIRECTORY_SEPARATOR . $fileId . '.mp3';
+                    if (file_exists($cachePath)) unlink($cachePath);
+                    $this->SendDebug('ForceSpeak', "Lokale Datei gelöscht: $fileId", 0);
+                }
+                unset($index[$key]);
             }
-            unset($index[$EventType]);
-            $this->SaveLocalIndex($index);
-            $this->SendDebug('ForceSpeak', "Cache-Eintrag für '$EventType' entfernt", 0);
         }
+        $this->SaveLocalIndex($index);
 
         // Server-Request mit force=true
         $serverURL   = rtrim($this->ReadPropertyString('ServerURL'), '/');
@@ -286,7 +302,7 @@ class UltimateVoiceDevice extends IPSModule
         $characterId = $this->ReadPropertyString('CharacterID');
         $mode        = $this->ReadPropertyString('DeliveryMode');
 
-        $response = $this->RequestGenerate($serverURL, $apiKey, $characterId, $EventType, true);
+        $response = $this->RequestGenerate($serverURL, $apiKey, $characterId, $EventType, true, $Room);
 
         if ($response === false) {
             $this->LogMessage("UV: ForceSpeak Server-Fehler für '$EventType'.", KL_ERROR);
@@ -312,7 +328,7 @@ class UltimateVoiceDevice extends IPSModule
 
         // Index aktualisieren
         $index = $this->LoadLocalIndex();
-        $index[$EventType] = ['file_id' => $fileId, 'path' => $localFile, 'text' => $response['text']];
+        $index[$cacheKey] = ['file_id' => $fileId, 'path' => $localFile, 'text' => $response['text'], 'room' => $Room ?: null];
         $this->SaveLocalIndex($index);
 
         if ($mode === 'userdir') return $this->AnnounceViaUserDir($fileId);
@@ -498,10 +514,14 @@ class UltimateVoiceDevice extends IPSModule
     private function RequestGenerate(
         string $serverURL, string $apiKey,
         string $characterId, string $eventType,
-        bool $force = false
+        bool $force = false,
+        string $room = ''
     ): array|false {
+        $params = [];
+        if ($force) $params[] = 'force=true';
+        if ($room !== '') $params[] = 'room=' . urlencode($room);
         $url = "$serverURL/v1/characters/$characterId/play/$eventType"
-             . ($force ? '?force=true' : '');
+             . ($params ? '?' . implode('&', $params) : '');
 
         $this->SendDebug('HTTP', "GET $url", 0);
 
