@@ -188,7 +188,7 @@ class UltimateVoiceDevice extends IPSModule
         }
 
         // --- Step 2: Server anfragen ---
-        $this->SendDebug('ServerRequest', "POST $serverURL/v1/poc/generate | character=$characterId | event=$EventType", 0);
+        $this->SendDebug('ServerRequest', "GET $serverURL/v1/characters/$characterId/play/$EventType", 0);
         $response = $this->RequestGenerate($serverURL, $apiKey, $characterId, $EventType);
 
         if ($response === false) {
@@ -280,44 +280,16 @@ class UltimateVoiceDevice extends IPSModule
             $this->SendDebug('ForceSpeak', "Cache-Eintrag für '$EventType' entfernt", 0);
         }
 
-        // Server-Request mit force_regenerate=true
+        // Server-Request mit force=true
         $serverURL   = rtrim($this->ReadPropertyString('ServerURL'), '/');
         $apiKey      = $this->ReadPropertyString('APIKey');
         $characterId = $this->ReadPropertyString('CharacterID');
         $mode        = $this->ReadPropertyString('DeliveryMode');
 
-        $payload  = json_encode([
-            'character_id'     => $characterId,
-            'event_type'       => $EventType,
-            'force_regenerate' => true,
-        ]);
+        $response = $this->RequestGenerate($serverURL, $apiKey, $characterId, $EventType, true);
 
-        $ch = curl_init("$serverURL/v1/poc/generate");
-        curl_setopt_array($ch, [
-            CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => $payload,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 30,
-            CURLOPT_HTTPHEADER     => [
-                'Content-Type: application/json',
-                'Authorization: Bearer ' . $apiKey,
-            ],
-        ]);
-        $body  = curl_exec($ch);
-        $error = curl_error($ch);
-        $code  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        $this->SendDebug('ForceSpeak', "HTTP $code | " . substr($body ?: '', 0, 300), 0);
-
-        if ($error || $code !== 200) {
-            $this->LogMessage("UV: ForceSpeak Server-Fehler (HTTP $code): $error", KL_ERROR);
-            return false;
-        }
-
-        $response = json_decode($body, true);
-        if (!isset($response['audio_url'], $response['file_id'])) {
-            $this->LogMessage('UV: ForceSpeak: Ungültige Server-Antwort.', KL_ERROR);
+        if ($response === false) {
+            $this->LogMessage("UV: ForceSpeak Server-Fehler für '$EventType'.", KL_ERROR);
             return false;
         }
 
@@ -525,21 +497,19 @@ class UltimateVoiceDevice extends IPSModule
 
     private function RequestGenerate(
         string $serverURL, string $apiKey,
-        string $characterId, string $eventType
+        string $characterId, string $eventType,
+        bool $force = false
     ): array|false {
-        $url     = "$serverURL/v1/poc/generate";
-        $payload = json_encode(['character_id' => $characterId, 'event_type' => $eventType]);
+        $url = "$serverURL/v1/characters/$characterId/play/$eventType"
+             . ($force ? '?force=true' : '');
 
-        $this->SendDebug('HTTP', "POST $url", 0);
+        $this->SendDebug('HTTP', "GET $url", 0);
 
         $ch = curl_init($url);
         curl_setopt_array($ch, [
-            CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => $payload,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_TIMEOUT        => 60,
             CURLOPT_HTTPHEADER     => [
-                'Content-Type: application/json',
                 'Authorization: Bearer ' . $apiKey,
             ],
         ]);

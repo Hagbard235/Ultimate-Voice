@@ -20,14 +20,10 @@
                 },
                 {
                     "name": "CharacterID",
-                    "type": "Select",
-                    "caption": "Charakter",
+                    "type": "ValidationTextBox",
+                    "caption": "Charakter-ID",
                     "width": "250px",
-                    "value": "butler_de",
-                    "options": [
-                        { "caption": "Hawkins, der Butler (butler_de)", "value": "butler_de" },
-                        { "caption": "Hopsi, der Osterhase (osterhase_de)", "value": "osterhase_de" }
-                    ]
+                    "value": "butler_de"
                 }
             ]
         },
