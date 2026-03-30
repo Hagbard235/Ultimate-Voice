@@ -162,6 +162,9 @@ class UltimateVoiceDevice extends IPSModule
                 if (file_exists($correctPath)) {
                     $this->SendDebug('LocalCache', "Hit! $correctPath", 0);
                     $this->LogMessage("UV: Lokaler Cache-Hit für '$EventType'", KL_MESSAGE);
+                    // Variablen aktualisieren (Text aus Index, URL aus Modus-Pfad)
+                    $this->SetValue('LastSpokenText', $cached['text'] ?? '(gecacht)');
+                    $this->SetValue('LastAudioURL',   $correctPath);
                     if ($mode === 'userdir') return $this->AnnounceViaUserDir($fileId);
                     return $this->AnnounceViaWebhook($fileId);
                 }
@@ -173,6 +176,8 @@ class UltimateVoiceDevice extends IPSModule
                     copy($cached['path'], $correctPath);
                     $this->SendDebug('LocalCache', "Kopiert: {$cached['path']} → $correctPath", 0);
                     $this->LogMessage("UV: Cache-Datei in neuen Modus-Pfad kopiert", KL_MESSAGE);
+                    $this->SetValue('LastSpokenText', $cached['text'] ?? '(gecacht)');
+                    $this->SetValue('LastAudioURL',   $correctPath);
                     if ($mode === 'userdir') return $this->AnnounceViaUserDir($fileId);
                     return $this->AnnounceViaWebhook($fileId);
                 }
@@ -236,13 +241,109 @@ class UltimateVoiceDevice extends IPSModule
         // Dateien werden nur gelöscht wenn der Server sie explizit deprecatet
         // (künftiger Sync-Endpunkt) oder via manuellem ClearCache()-Button.
         $index = $this->LoadLocalIndex();
-        $index[$EventType] = ['file_id' => $fileId, 'path' => $localFile];
+        $index[$EventType] = [
+            'file_id' => $fileId,
+            'path'    => $localFile,
+            'text'    => $response['text'] ?? '',
+        ];
         $this->SaveLocalIndex($index);
         $this->SendDebug('LocalCache', "Index aktualisiert: $EventType → $fileId", 0);
 
         if ($mode === 'userdir') {
             return $this->AnnounceViaUserDir($fileId);
         }
+        return $this->AnnounceViaWebhook($fileId);
+    }
+
+    /**
+     * Wie Speak(), erzwingt aber neue LLM-Generierung — lokaler Cache-Eintrag
+     * für dieses Event wird gelöscht, Server ignoriert seinen Cache ebenfalls.
+     * Nützlich zum Testen neuer Textvarianten.
+     * Aufruf: UVD_ForceSpeak($instanzId, 'doorbell');
+     */
+    public function ForceSpeak(string $EventType): bool
+    {
+        $this->SendDebug('ForceSpeak', "Erzwinge Neu-Generierung für: $EventType", 0);
+
+        // Lokalen Cache-Eintrag für dieses Event löschen
+        $index = $this->LoadLocalIndex();
+        if (isset($index[$EventType])) {
+            $fileId = $index[$EventType]['file_id'] ?? '';
+            if ($fileId) {
+                $this->DeleteUserDirFile($fileId);
+                $cachePath = $this->GetCacheDir() . DIRECTORY_SEPARATOR . $fileId . '.mp3';
+                if (file_exists($cachePath)) unlink($cachePath);
+                $this->SendDebug('ForceSpeak', "Lokale Datei gelöscht: $fileId", 0);
+            }
+            unset($index[$EventType]);
+            $this->SaveLocalIndex($index);
+            $this->SendDebug('ForceSpeak', "Cache-Eintrag für '$EventType' entfernt", 0);
+        }
+
+        // Server-Request mit force_regenerate=true
+        $serverURL   = rtrim($this->ReadPropertyString('ServerURL'), '/');
+        $apiKey      = $this->ReadPropertyString('APIKey');
+        $characterId = $this->ReadPropertyString('CharacterID');
+        $mode        = $this->ReadPropertyString('DeliveryMode');
+
+        $payload  = json_encode([
+            'character_id'     => $characterId,
+            'event_type'       => $EventType,
+            'force_regenerate' => true,
+        ]);
+
+        $ch = curl_init("$serverURL/v1/poc/generate");
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $payload,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_HTTPHEADER     => [
+                'Content-Type: application/json',
+                'Authorization: Bearer ' . $apiKey,
+            ],
+        ]);
+        $body  = curl_exec($ch);
+        $error = curl_error($ch);
+        $code  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        $this->SendDebug('ForceSpeak', "HTTP $code | " . substr($body ?: '', 0, 300), 0);
+
+        if ($error || $code !== 200) {
+            $this->LogMessage("UV: ForceSpeak Server-Fehler (HTTP $code): $error", KL_ERROR);
+            return false;
+        }
+
+        $response = json_decode($body, true);
+        if (!isset($response['audio_url'], $response['file_id'])) {
+            $this->LogMessage('UV: ForceSpeak: Ungültige Server-Antwort.', KL_ERROR);
+            return false;
+        }
+
+        $this->LogMessage("UV: ForceSpeak OK — \"{$response['text']}\"", KL_MESSAGE);
+        $this->SetValue('LastSpokenText', $response['text']);
+        $this->SetValue('LastAudioURL',   $response['audio_url']);
+
+        if ($mode === 'direct') {
+            return $this->AnnounceViaDirect($response['audio_url']);
+        }
+
+        // Datei herunterladen und lokal speichern
+        $fileId    = $response['file_id'];
+        $localFile = $this->GetLocalFilePath($mode, $fileId);
+        if (!is_dir(dirname($localFile))) mkdir(dirname($localFile), 0755, true);
+        $audioData = $this->DownloadAudio($response['audio_url'], $apiKey);
+        if ($audioData === false) return false;
+        file_put_contents($localFile, $audioData);
+        $this->SendDebug('ForceSpeak', "Gespeichert: $localFile (" . strlen($audioData) . ' Bytes)', 0);
+
+        // Index aktualisieren
+        $index = $this->LoadLocalIndex();
+        $index[$EventType] = ['file_id' => $fileId, 'path' => $localFile, 'text' => $response['text']];
+        $this->SaveLocalIndex($index);
+
+        if ($mode === 'userdir') return $this->AnnounceViaUserDir($fileId);
         return $this->AnnounceViaWebhook($fileId);
     }
 

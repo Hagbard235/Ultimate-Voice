@@ -94,8 +94,13 @@
                 },
                 {
                     "type": "Button",
-                    "caption": "Sprechen + Echo Announce",
+                    "caption": "Sprechen (Cache)",
                     "onClick": "echo UVD_TestSpeak($id, $TestEventType);"
+                },
+                {
+                    "type": "Button",
+                    "caption": "Neu generieren (LLM-Test)",
+                    "onClick": "echo UVD_ForceSpeak($id, $TestEventType);"
                 },
                 {
                     "type": "Button",
