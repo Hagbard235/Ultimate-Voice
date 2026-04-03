@@ -86,6 +86,206 @@ class UltimateVoiceDevice extends IPSModule
     }
 
     // =========================================================================
+    // Dynamisches Konfigurations-Formular
+    // Lädt Charaktere und Event-Typen live vom Server
+    // =========================================================================
+
+    public function GetConfigurationForm(): string
+    {
+        $serverURL = rtrim($this->ReadPropertyString('ServerURL'), '/');
+        $apiKey    = $this->ReadPropertyString('APIKey');
+
+        // Fallback-Optionen falls Server nicht erreichbar
+        $charOptions = [
+            ['caption' => 'butler_de (Fallback — Server nicht erreichbar)', 'value' => 'butler_de'],
+        ];
+        $eventOptions = [
+            ['caption' => 'Türklingel (doorbell)', 'value' => 'doorbell'],
+            ['caption' => 'Batterie leer (battery_low)', 'value' => 'battery_low'],
+            ['caption' => 'Bewegung (motion_detected)', 'value' => 'motion_detected'],
+            ['caption' => 'Willkommen (welcome)', 'value' => 'welcome'],
+        ];
+
+        $catalogLoaded = false;
+        $catalogError  = '';
+
+        if (!empty($serverURL) && !empty($apiKey)) {
+            $catalog = $this->FetchCatalog($serverURL, $apiKey);
+            if ($catalog !== false) {
+                // Charaktere
+                if (!empty($catalog['characters'])) {
+                    $charOptions = array_map(function ($c) {
+                        $tier  = strtoupper($c['tier']);
+                        $lang  = strtoupper($c['language']);
+                        return ['caption' => "{$c['name']} ({$lang} · {$tier})", 'value' => $c['id']];
+                    }, $catalog['characters']);
+                }
+                // Event-Typen
+                if (!empty($catalog['event_types'])) {
+                    $eventOptions = array_map(function ($e) {
+                        return ['caption' => "{$e['label']} ({$e['id']})", 'value' => $e['id']];
+                    }, $catalog['event_types']);
+                }
+                $catalogLoaded = true;
+            } else {
+                $catalogError = 'Server nicht erreichbar oder API Key ungültig — Fallback-Werte werden angezeigt.';
+            }
+        } else {
+            $catalogError = 'Bitte Server URL und API Key eingeben, dann "Konfiguration neu laden" klicken.';
+        }
+
+        $statusLabel = $catalogLoaded
+            ? '✅ Charaktere und Event-Typen erfolgreich vom Server geladen.'
+            : '⚠️ ' . $catalogError;
+
+        $form = [
+            'elements' => [
+                [
+                    'type'     => 'ExpansionPanel',
+                    'caption'  => 'Server-Verbindung',
+                    'expanded' => true,
+                    'items'    => [
+                        [
+                            'name'    => 'ServerURL',
+                            'type'    => 'ValidationTextBox',
+                            'caption' => 'Server URL',
+                            'width'   => '400px',
+                            'value'   => 'https://voice.smarthome-services.xyz',
+                        ],
+                        [
+                            'name'    => 'APIKey',
+                            'type'    => 'PasswordTextBox',
+                            'caption' => 'API Key',
+                            'width'   => '400px',
+                        ],
+                        [
+                            'type'    => 'Label',
+                            'caption' => $statusLabel,
+                            'italic'  => true,
+                        ],
+                    ],
+                ],
+                [
+                    'type'     => 'ExpansionPanel',
+                    'caption'  => 'Charakter',
+                    'expanded' => true,
+                    'items'    => [
+                        [
+                            'name'    => 'CharacterID',
+                            'type'    => 'Select',
+                            'caption' => 'Charakter',
+                            'width'   => '400px',
+                            'options' => $charOptions,
+                        ],
+                    ],
+                ],
+                [
+                    'type'     => 'ExpansionPanel',
+                    'caption'  => 'Ausgabe (Echo / Alexa)',
+                    'expanded' => true,
+                    'items'    => [
+                        [
+                            'name'     => 'EchoRemoteID',
+                            'type'     => 'SelectInstance',
+                            'caption'  => 'EchoRemote Instanz',
+                            'width'    => '400px',
+                            'moduleID' => '{496AB8B5-396A-40E4-AF41-32F4AA6F5404}',
+                        ],
+                        [
+                            'name'    => 'DeliveryMode',
+                            'type'    => 'Select',
+                            'caption' => 'Auslieferungs-Modus',
+                            'width'   => '350px',
+                            'value'   => 'userdir',
+                            'options' => [
+                                ['caption' => 'IPS /user/-Verzeichnis via Connect (Free)', 'value' => 'userdir'],
+                                ['caption' => 'Webhook via IPS Connect (experimentell)',   'value' => 'webhook'],
+                                ['caption' => 'Direkt vom Server (Premium)',               'value' => 'direct'],
+                            ],
+                        ],
+                        [
+                            'type'    => 'Label',
+                            'caption' => 'UserDir: MP3 im /user/-Verzeichnis, Alexa holt via IPMagic-URL.',
+                            'italic'  => true,
+                        ],
+                        [
+                            'type'    => 'Label',
+                            'caption' => 'Direkt: Alexa holt Audio direkt vom Ultimate Voice Server. Erfordert Premium-Abo.',
+                            'italic'  => true,
+                        ],
+                    ],
+                ],
+            ],
+            'actions' => [
+                [
+                    'type'     => 'ExpansionPanel',
+                    'caption'  => 'Test',
+                    'expanded' => true,
+                    'items'    => [
+                        [
+                            'type'    => 'ValidationTextBox',
+                            'name'    => 'TestRoom',
+                            'caption' => 'Raum / Kontext (optional)',
+                            'width'   => '250px',
+                            'value'   => '',
+                        ],
+                        [
+                            'type'    => 'Select',
+                            'name'    => 'TestEventType',
+                            'caption' => 'Test-Event',
+                            'width'   => '350px',
+                            'options' => $eventOptions,
+                        ],
+                        [
+                            'type'    => 'Button',
+                            'caption' => 'Sprechen (Cache)',
+                            'onClick' => 'echo UVD_Speak($id, $TestEventType, $TestRoom);',
+                        ],
+                        [
+                            'type'    => 'Button',
+                            'caption' => 'Neu generieren (LLM-Test)',
+                            'onClick' => 'echo UVD_ForceSpeak($id, $TestEventType, $TestRoom);',
+                        ],
+                        [
+                            'type'    => 'Button',
+                            'caption' => 'Webhook Status prüfen',
+                            'onClick' => 'echo UVD_GetWebhookStatus($id);',
+                        ],
+                        [
+                            'type'    => 'Button',
+                            'caption' => 'Lokalen Cache leeren',
+                            'onClick' => 'echo UVD_ClearCache($id);',
+                        ],
+                    ],
+                ],
+                [
+                    'type'    => 'Button',
+                    'caption' => '🔄 Konfiguration neu laden (Charaktere & Events vom Server)',
+                    'onClick' => 'IPS_RequestAction($id, "ReloadForm", "");',
+                ],
+                [
+                    'type'    => 'Label',
+                    'caption' => 'Direkte Nutzung in IPS-Skripten: UVD_Speak($id, \'doorbell\');  oder mit Raum: UVD_Speak($id, \'motion_detected\', \'Garage\');',
+                    'italic'  => true,
+                ],
+            ],
+            'status' => [],
+        ];
+
+        return json_encode($form);
+    }
+
+    /**
+     * Wird aufgerufen wenn der "Neu laden"-Button gedrückt wird.
+     */
+    public function RequestAction(string $ident, mixed $value): void
+    {
+        if ($ident === 'ReloadForm') {
+            $this->ReloadForm();
+        }
+    }
+
+    // =========================================================================
     // Webhook — IPS ruft ProcessHookData() auf wenn die URL aufgerufen wird
     // =========================================================================
 
@@ -134,7 +334,7 @@ class UltimateVoiceDevice extends IPSModule
 
     /**
      * Spricht eine Phrase für das angegebene Event aus.
-     * @param string $EventType  Eines der bekannten Events (doorbell, welcome, …)
+     * @param string $EventType  Event-ID aus dem Portal (z.B. doorbell, motion_detected, …)
      * @param string $Room       Optionaler Raum-/Kontext-String (z.B. "Wohnzimmer").
      *                           Wenn angegeben, werden raum-spezifische Phrasen bevorzugt.
      * Aufruf: UVD_Speak($id, 'doorbell');
@@ -157,11 +357,9 @@ class UltimateVoiceDevice extends IPSModule
         }
 
         // --- Step 1: Lokaler Cache-Check (webhook + userdir) ---
-        // Cache-Key: eventType + optionaler Raum → raum-spezifische Phrasen separat gecacht
         $cacheKey = $Room ? "{$EventType}::{$Room}" : $EventType;
         if ($mode === 'webhook' || $mode === 'userdir') {
             $index  = $this->LoadLocalIndex();
-            // Raum-spezifisch suchen, bei Miss auf allgemein zurückfallen
             $cached = $index[$cacheKey] ?? $index[$EventType] ?? null;
             $this->SendDebug('LocalCache', "cacheKey=$cacheKey | entry=" . ($cached ? json_encode($cached) : 'nicht vorhanden'), 0);
 
@@ -169,18 +367,15 @@ class UltimateVoiceDevice extends IPSModule
                 $fileId      = $cached['file_id'];
                 $correctPath = $this->GetLocalFilePath($mode, $fileId);
 
-                // Datei am richtigen Ort für aktuellen Modus vorhanden?
                 if (file_exists($correctPath)) {
                     $this->SendDebug('LocalCache', "Hit! $correctPath", 0);
                     $this->LogMessage("UV: Lokaler Cache-Hit für '$EventType'", KL_MESSAGE);
-                    // Variablen aktualisieren (Text aus Index, URL aus Modus-Pfad)
                     $this->SetValue('LastSpokenText', $cached['text'] ?? '(gecacht)');
                     $this->SetValue('LastAudioURL',   $correctPath);
                     if ($mode === 'userdir') return $this->AnnounceViaUserDir($fileId);
                     return $this->AnnounceViaWebhook($fileId);
                 }
 
-                // Datei am alten Pfad vorhanden (z.B. Modus-Wechsel)? → kopieren
                 if (!empty($cached['path']) && file_exists($cached['path'])) {
                     $destDir = dirname($correctPath);
                     if (!is_dir($destDir)) mkdir($destDir, 0755, true);
@@ -220,7 +415,6 @@ class UltimateVoiceDevice extends IPSModule
             return $this->AnnounceViaDirect($response['audio_url']);
         }
 
-        // userdir + webhook: herunterladen → lokal speichern
         $fileId    = $response['file_id'];
         $localFile = $this->GetLocalFilePath($mode, $fileId);
         $localDir  = dirname($localFile);
@@ -247,10 +441,6 @@ class UltimateVoiceDevice extends IPSModule
             $this->SendDebug('Download', 'Übersprungen — Datei vorhanden', 0);
         }
 
-        // Index aktualisieren — keine automatische Löschung alter Dateien hier!
-        // Im Produktivsystem gibt es mehrere Varianten pro Event (z.B. 5 Sätze).
-        // Dateien werden nur gelöscht wenn der Server sie explizit deprecatet
-        // (künftiger Sync-Endpunkt) oder via manuellem ClearCache()-Button.
         $index = $this->LoadLocalIndex();
         $index[$cacheKey] = [
             'file_id' => $fileId,
@@ -268,9 +458,7 @@ class UltimateVoiceDevice extends IPSModule
     }
 
     /**
-     * Wie Speak(), erzwingt aber neue LLM-Generierung — lokaler Cache-Eintrag
-     * für dieses Event wird gelöscht, Server ignoriert seinen Cache ebenfalls.
-     * Nützlich zum Testen neuer Textvarianten.
+     * Wie Speak(), erzwingt aber neue LLM-Generierung.
      * Aufruf: UVD_ForceSpeak($instanzId, 'doorbell');
      *         UVD_ForceSpeak($instanzId, 'motion_detected', 'Garten');
      */
@@ -280,7 +468,6 @@ class UltimateVoiceDevice extends IPSModule
 
         $cacheKey = $Room ? "{$EventType}::{$Room}" : $EventType;
 
-        // Lokalen Cache-Eintrag für dieses Event/Raum löschen
         $index = $this->LoadLocalIndex();
         foreach ([$cacheKey, $EventType] as $key) {
             if (isset($index[$key])) {
@@ -296,7 +483,6 @@ class UltimateVoiceDevice extends IPSModule
         }
         $this->SaveLocalIndex($index);
 
-        // Server-Request mit force=true
         $serverURL   = rtrim($this->ReadPropertyString('ServerURL'), '/');
         $apiKey      = $this->ReadPropertyString('APIKey');
         $characterId = $this->ReadPropertyString('CharacterID');
@@ -317,7 +503,6 @@ class UltimateVoiceDevice extends IPSModule
             return $this->AnnounceViaDirect($response['audio_url']);
         }
 
-        // Datei herunterladen und lokal speichern
         $fileId    = $response['file_id'];
         $localFile = $this->GetLocalFilePath($mode, $fileId);
         if (!is_dir(dirname($localFile))) mkdir(dirname($localFile), 0755, true);
@@ -326,7 +511,6 @@ class UltimateVoiceDevice extends IPSModule
         file_put_contents($localFile, $audioData);
         $this->SendDebug('ForceSpeak', "Gespeichert: $localFile (" . strlen($audioData) . ' Bytes)', 0);
 
-        // Index aktualisieren
         $index = $this->LoadLocalIndex();
         $index[$cacheKey] = ['file_id' => $fileId, 'path' => $localFile, 'text' => $response['text'], 'room' => $Room ?: null];
         $this->SaveLocalIndex($index);
@@ -335,16 +519,11 @@ class UltimateVoiceDevice extends IPSModule
         return $this->AnnounceViaWebhook($fileId);
     }
 
-    /**
-     * Diagnose-Button: Zeigt ob der Webhook tatsächlich registriert ist,
-     * welche Connect-URL verfügbar ist, und was IPS_GetHookList() zurückgibt.
-     */
     public function GetWebhookStatus(): string
     {
         $hookPath = '/hook/uv_' . $this->InstanceID;
         $lines    = ["=== Webhook-Diagnose (Instanz #{$this->InstanceID}) ===", ''];
 
-        // 1. Ist der Hook in der IPS-Hookliste?
         if (function_exists('IPS_GetHookList')) {
             $hooks = IPS_GetHookList();
             $this->SendDebug('HookList', json_encode($hooks), 0);
@@ -364,7 +543,6 @@ class UltimateVoiceDevice extends IPSModule
             $lines[] = '⚠️ IPS_GetHookList() nicht verfügbar';
         }
 
-        // 2. Connect URL
         $lines[] = '';
         $connectURL = $this->GetConnectURL();
         if (!empty($connectURL)) {
@@ -375,7 +553,6 @@ class UltimateVoiceDevice extends IPSModule
             $lines[] = '❌ Connect URL nicht verfügbar';
         }
 
-        // 3. RegisterHook nochmal probieren mit explizitem Feedback
         $lines[] = '';
         try {
             $this->RegisterHook($hookPath);
@@ -427,10 +604,46 @@ class UltimateVoiceDevice extends IPSModule
     // =========================================================================
 
     /**
-     * USERDIR: MP3 liegt im IPS /user/-Verzeichnis, das über IPMagic öffentlich
-     * erreichbar ist. Kein Webhook, keine Registrierung nötig.
-     * URL: https://{hash}.ipmagic.de/user/uv_{fileId}.mp3
+     * Holt Charaktere und Event-Typen vom Server via API Key.
+     * Gibt assoziatives Array oder false bei Fehler zurück.
      */
+    private function FetchCatalog(string $serverURL, string $apiKey): array|false
+    {
+        $url = "$serverURL/v1/catalog";
+        $this->SendDebug('Catalog', "GET $url", 0);
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 10,
+            CURLOPT_HTTPHEADER     => ['Authorization: Bearer ' . $apiKey],
+        ]);
+
+        $body  = curl_exec($ch);
+        $error = curl_error($ch);
+        $code  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($error || $code !== 200) {
+            $this->SendDebug('Catalog', "Fehler: HTTP $code | $error", 0);
+            return false;
+        }
+
+        $data = json_decode($body, true);
+        if (!isset($data['characters'], $data['event_types'])) {
+            $this->SendDebug('Catalog', 'Unerwartetes Format: ' . substr($body, 0, 200), 0);
+            return false;
+        }
+
+        $this->SendDebug('Catalog', sprintf(
+            'Geladen: %d Charaktere, %d Event-Typen',
+            count($data['characters']),
+            count($data['event_types'])
+        ), 0);
+
+        return $data;
+    }
+
     private function AnnounceViaUserDir(string $fileId): bool
     {
         $connectURL = $this->GetConnectURL();
@@ -445,11 +658,6 @@ class UltimateVoiceDevice extends IPSModule
         return $this->SendSSMLToEcho($audioURL);
     }
 
-    /**
-     * Gibt den lokalen Dateipfad je nach Modus zurück.
-     * userdir → IPS_GetKernelDir()/user/uv_{fileId}.mp3  (öffentlich via Connect)
-     * webhook → GetCacheDir()/{fileId}.mp3               (privat, via Webhook)
-     */
     private function GetLocalFilePath(string $mode, string $fileId): string
     {
         if ($mode === 'userdir') {
@@ -606,22 +814,13 @@ class UltimateVoiceDevice extends IPSModule
         );
     }
 
-    /**
-     * Gibt die IPS Connect URL zurück (z.B. https://xxx.ipmagic.de).
-     * Verwendet CC_GetURL() über die Connect Control Instanz.
-     */
-    /**
-     * Kompletten lokalen Cache leeren: Index + alle Dateien aus /user/ und Cache-Dir.
-     */
     public function ClearCache(): string
     {
         $index   = $this->LoadLocalIndex();
         $deleted = 0;
 
         foreach ($index as $eventType => $entry) {
-            // Aus /user/ löschen
             $this->DeleteUserDirFile($entry['file_id']);
-            // Aus Cache-Dir löschen
             $cachePath = $this->GetCacheDir() . DIRECTORY_SEPARATOR . $entry['file_id'] . '.mp3';
             if (file_exists($cachePath)) {
                 unlink($cachePath);
@@ -629,16 +828,12 @@ class UltimateVoiceDevice extends IPSModule
             $deleted++;
         }
 
-        // Index leeren
         $this->SaveLocalIndex([]);
         $this->SendDebug('ClearCache', "Geleert — $deleted Einträge entfernt", 0);
         $this->LogMessage("UV: Lokaler Cache geleert ($deleted Dateien)", KL_MESSAGE);
         return "✅ Cache geleert — $deleted Dateien entfernt.";
     }
 
-    /**
-     * Löscht eine uv_{fileId}.mp3 aus dem IPS /user/-Verzeichnis.
-     */
     private function DeleteUserDirFile(string $fileId): void
     {
         $path = IPS_GetKernelDir() . 'user' . DIRECTORY_SEPARATOR . 'uv_' . $fileId . '.mp3';
