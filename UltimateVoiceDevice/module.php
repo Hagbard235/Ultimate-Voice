@@ -319,21 +319,29 @@ class UltimateVoiceDevice extends IPSModule
 
     /**
      * Spricht eine Phrase für das angegebene Event aus.
-     * @param string $EventType  Event-ID aus dem Portal (z.B. doorbell, motion_detected, …)
-     * @param string $Room       Optionaler Raum-/Kontext-String (z.B. "Wohnzimmer").
-     *                           Wenn angegeben, werden raum-spezifische Phrasen bevorzugt.
-     * Aufruf: UVD_Speak($id, 'doorbell');
-     *         UVD_Speak($id, 'motion_detected', 'Garage');
+     *
+     * @param string     $EventType  Event-ID aus dem Portal (z.B. doorbell, motion_detected, …)
+     * @param string     $Room       Optionaler Raum-/Kontext-String (z.B. "Wohnzimmer").
+     * @param int|array  $EchoIDs    Optional: einzelne EchoRemote-Instanz-ID (int) ODER
+     *                               Array von IDs für gleichzeitige Ausgabe auf mehreren Geräten.
+     *                               Wenn weggelassen: konfigurierte Instanz wird verwendet.
+     *
+     * Beispiele:
+     *   UVD_Speak($id, 'doorbell');
+     *   UVD_Speak($id, 'doorbell', 'Garage');
+     *   UVD_Speak($id, 'doorbell', '', 54321);
+     *   UVD_Speak($id, 'motion_detected', 'Eingang', [12345, 67890, 11111]);
      */
-    public function Speak(string $EventType, string $Room = ''): bool
+    public function Speak(string $EventType, string $Room = '', $EchoIDs = null): bool
     {
         $serverURL   = rtrim($this->ReadPropertyString('ServerURL'), '/');
         $apiKey      = $this->ReadPropertyString('APIKey');
         $characterId = $this->ReadPropertyString('CharacterID');
         $mode        = $this->ReadPropertyString('DeliveryMode');
 
-        $this->SendDebug('Speak', "EventType=$EventType | Room=$Room | CharacterID=$characterId | DeliveryMode=$mode", 0);
-        $this->LogMessage("UV: Speak('$EventType'" . ($Room ? ", Raum='$Room'" : '') . ") — Modus=$mode, Charakter=$characterId", KL_MESSAGE);
+        $echoLabel = is_array($EchoIDs) ? count($EchoIDs) . ' Geräte' : ($EchoIDs > 0 ? "ID=$EchoIDs" : 'konfiguriert');
+        $this->SendDebug('Speak', "EventType=$EventType | Room=$Room | CharacterID=$characterId | DeliveryMode=$mode | Echo=$echoLabel", 0);
+        $this->LogMessage("UV: Speak('$EventType'" . ($Room ? ", Raum='$Room'" : '') . ") — Modus=$mode, Charakter=$characterId, Echo=$echoLabel", KL_MESSAGE);
 
         if (empty($serverURL)) {
             $this->SendDebug('Speak', 'FEHLER: Server URL nicht konfiguriert', 0);
@@ -357,8 +365,8 @@ class UltimateVoiceDevice extends IPSModule
                     $this->LogMessage("UV: Lokaler Cache-Hit für '$EventType'", KL_MESSAGE);
                     $this->SetValue('LastSpokenText', $cached['text'] ?? '(gecacht)');
                     $this->SetValue('LastAudioURL',   $correctPath);
-                    if ($mode === 'userdir') return $this->AnnounceViaUserDir($fileId);
-                    return $this->AnnounceViaWebhook($fileId);
+                    if ($mode === 'userdir') return $this->AnnounceViaUserDir($fileId, $EchoIDs);
+                    return $this->AnnounceViaWebhook($fileId, $EchoIDs);
                 }
 
                 if (!empty($cached['path']) && file_exists($cached['path'])) {
@@ -369,8 +377,8 @@ class UltimateVoiceDevice extends IPSModule
                     $this->LogMessage("UV: Cache-Datei in neuen Modus-Pfad kopiert", KL_MESSAGE);
                     $this->SetValue('LastSpokenText', $cached['text'] ?? '(gecacht)');
                     $this->SetValue('LastAudioURL',   $correctPath);
-                    if ($mode === 'userdir') return $this->AnnounceViaUserDir($fileId);
-                    return $this->AnnounceViaWebhook($fileId);
+                    if ($mode === 'userdir') return $this->AnnounceViaUserDir($fileId, $EchoIDs);
+                    return $this->AnnounceViaWebhook($fileId, $EchoIDs);
                 }
 
                 $this->SendDebug('LocalCache', "Miss — Datei nicht gefunden (file_id=$fileId)", 0);
@@ -397,7 +405,7 @@ class UltimateVoiceDevice extends IPSModule
         // --- Step 3: Ausliefern ---
         if ($mode === 'direct') {
             $this->SendDebug('Deliver', 'direct → ' . $response['audio_url'], 0);
-            return $this->AnnounceViaDirect($response['audio_url']);
+            return $this->AnnounceViaDirect($response['audio_url'], $EchoIDs);
         }
 
         $fileId    = $response['file_id'];
@@ -437,17 +445,18 @@ class UltimateVoiceDevice extends IPSModule
         $this->SendDebug('LocalCache', "Index aktualisiert: $cacheKey → $fileId", 0);
 
         if ($mode === 'userdir') {
-            return $this->AnnounceViaUserDir($fileId);
+            return $this->AnnounceViaUserDir($fileId, $EchoIDs);
         }
-        return $this->AnnounceViaWebhook($fileId);
+        return $this->AnnounceViaWebhook($fileId, $EchoIDs);
     }
 
     /**
      * Wie Speak(), erzwingt aber neue LLM-Generierung.
      * Aufruf: UVD_ForceSpeak($instanzId, 'doorbell');
      *         UVD_ForceSpeak($instanzId, 'motion_detected', 'Garten');
+     *         UVD_ForceSpeak($instanzId, 'doorbell', '', [12345, 67890]);
      */
-    public function ForceSpeak(string $EventType, string $Room = ''): bool
+    public function ForceSpeak(string $EventType, string $Room = '', $EchoIDs = null): bool
     {
         $this->SendDebug('ForceSpeak', "Erzwinge Neu-Generierung für: $EventType | Room=$Room", 0);
 
@@ -485,7 +494,7 @@ class UltimateVoiceDevice extends IPSModule
         $this->SetValue('LastAudioURL',   $response['audio_url']);
 
         if ($mode === 'direct') {
-            return $this->AnnounceViaDirect($response['audio_url']);
+            return $this->AnnounceViaDirect($response['audio_url'], $EchoIDs);
         }
 
         $fileId    = $response['file_id'];
@@ -500,8 +509,8 @@ class UltimateVoiceDevice extends IPSModule
         $index[$cacheKey] = ['file_id' => $fileId, 'path' => $localFile, 'text' => $response['text'], 'room' => $Room ?: null];
         $this->SaveLocalIndex($index);
 
-        if ($mode === 'userdir') return $this->AnnounceViaUserDir($fileId);
-        return $this->AnnounceViaWebhook($fileId);
+        if ($mode === 'userdir') return $this->AnnounceViaUserDir($fileId, $EchoIDs);
+        return $this->AnnounceViaWebhook($fileId, $EchoIDs);
     }
 
     public function GetWebhookStatus(): string
@@ -629,7 +638,7 @@ class UltimateVoiceDevice extends IPSModule
         return $data;
     }
 
-    private function AnnounceViaUserDir(string $fileId): bool
+    private function AnnounceViaUserDir(string $fileId, $echoIDs = null): bool
     {
         $connectURL = $this->GetConnectURL();
         if (empty($connectURL)) {
@@ -640,7 +649,7 @@ class UltimateVoiceDevice extends IPSModule
 
         $audioURL = $connectURL . '/user/uv_' . $fileId . '.mp3';
         $this->SendDebug('Announce', "UserDir-URL für Alexa: $audioURL", 0);
-        return $this->SendSSMLToEcho($audioURL);
+        return $this->SendSSMLToEcho($audioURL, $echoIDs);
     }
 
     private function GetLocalFilePath(string $mode, string $fileId): string
@@ -651,7 +660,7 @@ class UltimateVoiceDevice extends IPSModule
         return $this->GetCacheDir() . DIRECTORY_SEPARATOR . $fileId . '.mp3';
     }
 
-    private function AnnounceViaWebhook(string $fileId): bool
+    private function AnnounceViaWebhook(string $fileId, $echoIDs = null): bool
     {
         if (!IPS_ModuleExists('{9486D575-EE8C-40D7-9051-7E30E223C581}')) {
             $this->SendDebug('Announce', 'FEHLER: Connect Control Modul nicht gefunden', 0);
@@ -671,37 +680,60 @@ class UltimateVoiceDevice extends IPSModule
         $webhookURL  = "$connectBase/hook/$hookName?id=$fileId&char=$characterId";
 
         $this->SendDebug('Announce', "Webhook-URL für Alexa: $webhookURL", 0);
-        return $this->SendSSMLToEcho($webhookURL);
+        return $this->SendSSMLToEcho($webhookURL, $echoIDs);
     }
 
-    private function AnnounceViaDirect(string $audioURL): bool
+    private function AnnounceViaDirect(string $audioURL, $echoIDs = null): bool
     {
         $this->SendDebug('Announce', "Direkt-URL für Alexa: $audioURL", 0);
-        return $this->SendSSMLToEcho($audioURL);
+        return $this->SendSSMLToEcho($audioURL, $echoIDs);
     }
 
-    private function SendSSMLToEcho(string $audioURL): bool
+    /**
+     * Sendet SSML an ein oder mehrere Echo-Geräte.
+     *
+     * @param string         $audioURL  MP3-URL für Alexa
+     * @param int|array|null $echoIDs   null → konfigurierte Instanz
+     *                                  int  → einzelne Override-ID
+     *                                  array → mehrere IDs gleichzeitig
+     */
+    private function SendSSMLToEcho(string $audioURL, $echoIDs = null): bool
     {
-        $echoId = $this->ReadPropertyInteger('EchoRemoteID');
-        $this->SendDebug('EchoRemote', "EchoRemoteID=$echoId", 0);
-
-        if ($echoId <= 0) {
-            $this->SendDebug('EchoRemote', 'FEHLER: ID nicht gesetzt', 0);
-            $this->LogMessage('UV: EchoRemote nicht konfiguriert.', KL_WARNING);
-            return false;
-        }
-        if (!IPS_InstanceExists($echoId)) {
-            $this->SendDebug('EchoRemote', "FEHLER: Instanz $echoId existiert nicht", 0);
-            $this->LogMessage("UV: EchoRemote Instanz $echoId existiert nicht.", KL_ERROR);
-            return false;
+        // IDs auflösen: null → konfiguriert, int → single, array → multi
+        if ($echoIDs === null) {
+            $ids = [$this->ReadPropertyInteger('EchoRemoteID')];
+        } elseif (is_array($echoIDs)) {
+            $ids = $echoIDs;
+        } else {
+            $ids = [(int)$echoIDs];
         }
 
-        $ssml = '<speak><audio src="' . htmlspecialchars($audioURL, ENT_XML1) . '"/></speak>';
-        $this->SendDebug('EchoRemote', "Sende SSML: $ssml", 0);
+        $ssml    = '<speak><audio src="' . htmlspecialchars($audioURL, ENT_XML1) . '"/></speak>';
+        $success = false;
 
-        EchoRemote_TextToSpeech($echoId, $ssml);
-        $this->LogMessage("UV: Echo-Announce: $audioURL", KL_MESSAGE);
-        return true;
+        foreach ($ids as $echoId) {
+            $echoId = (int)$echoId;
+            if ($echoId <= 0) {
+                $this->SendDebug('EchoRemote', "Übersprungen: ID=$echoId (ungültig)", 0);
+                continue;
+            }
+            if (!IPS_InstanceExists($echoId)) {
+                $this->SendDebug('EchoRemote', "Übersprungen: Instanz $echoId existiert nicht", 0);
+                $this->LogMessage("UV: EchoRemote Instanz $echoId existiert nicht — übersprungen.", KL_WARNING);
+                continue;
+            }
+
+            $this->SendDebug('EchoRemote', "Sende an ID=$echoId: $ssml", 0);
+            EchoRemote_TextToSpeech($echoId, $ssml);
+            $this->LogMessage("UV: Echo-Announce ID=$echoId: $audioURL", KL_MESSAGE);
+            $success = true;
+        }
+
+        if (!$success) {
+            $this->LogMessage('UV: Kein gültiges Echo-Gerät gefunden.', KL_WARNING);
+        }
+
+        return $success;
     }
 
     private function RequestGenerate(
