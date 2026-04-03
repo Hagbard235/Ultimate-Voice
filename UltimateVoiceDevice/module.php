@@ -513,6 +513,31 @@ class UltimateVoiceDevice extends IPSModule
         return $this->AnnounceViaWebhook($fileId, $EchoIDs);
     }
 
+    /**
+     * Spricht eine Phrase gleichzeitig auf mehreren Echo-Geräten.
+     * Alle Geräte im Array spielen simultan — kein Delay zwischen den Dots.
+     *
+     * @param string $EventType  Event-ID (z.B. 'doorbell', 'motion_detected')
+     * @param string $Room       Optionaler Raum-Kontext
+     * @param array  $EchoIDs   Array mit EchoRemote-Instanz-IDs, z.B. [34274, 45302, 59264]
+     *
+     * Aufruf: UVD_SpeakMulti($id, 'doorbell', '', [34274, 45302, 59264, 57384]);
+     *         UVD_SpeakMulti($id, 'motion_detected', 'EG', [34274, 45302]);
+     */
+    public function SpeakMulti(string $EventType, string $Room, array $EchoIDs): bool
+    {
+        return $this->Speak($EventType, $Room, $EchoIDs);
+    }
+
+    /**
+     * Wie SpeakMulti(), erzwingt aber neue LLM-Generierung.
+     * Aufruf: UVD_ForceSpeakMulti($id, 'doorbell', '', [34274, 45302]);
+     */
+    public function ForceSpeakMulti(string $EventType, string $Room, array $EchoIDs): bool
+    {
+        return $this->ForceSpeak($EventType, $Room, $EchoIDs);
+    }
+
     public function GetWebhookStatus(): string
     {
         $hookPath = '/hook/uv_' . $this->InstanceID;
