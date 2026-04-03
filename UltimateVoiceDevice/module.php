@@ -259,11 +259,6 @@ class UltimateVoiceDevice extends IPSModule
                     ],
                 ],
                 [
-                    'type'    => 'Button',
-                    'caption' => '🔄 Konfiguration neu laden (Charaktere & Events vom Server)',
-                    'onClick' => 'IPS_RequestAction($id, "ReloadForm", "");',
-                ],
-                [
                     'type'    => 'Label',
                     'caption' => 'Direkte Nutzung in IPS-Skripten: UVD_Speak($id, \'doorbell\');  oder mit Raum: UVD_Speak($id, \'motion_detected\', \'Garage\');',
                     'italic'  => true,
@@ -273,16 +268,6 @@ class UltimateVoiceDevice extends IPSModule
         ];
 
         return json_encode($form);
-    }
-
-    /**
-     * Wird aufgerufen wenn der "Neu laden"-Button gedrückt wird.
-     */
-    public function RequestAction(string $ident, mixed $value): void
-    {
-        if ($ident === 'ReloadForm') {
-            $this->ReloadForm();
-        }
     }
 
     // =========================================================================
