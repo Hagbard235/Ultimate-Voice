@@ -692,10 +692,13 @@ class UltimateVoiceDevice extends IPSModule
     /**
      * Sendet SSML an ein oder mehrere Echo-Geräte.
      *
+     * Einzelnes Gerät  → EchoRemote_TextToSpeech()        (wie bisher)
+     * Mehrere Geräte   → ECHOREMOTE_TextToSpeechEx()      (simultan, nicht nacheinander!)
+     *
      * @param string         $audioURL  MP3-URL für Alexa
-     * @param int|array|null $echoIDs   null → konfigurierte Instanz
-     *                                  int  → einzelne Override-ID
-     *                                  array → mehrere IDs gleichzeitig
+     * @param int|array|null $echoIDs   null  → konfigurierte Instanz
+     *                                  int   → einzelne Override-ID
+     *                                  array → mehrere IDs gleichzeitig (synchron)
      */
     private function SendSSMLToEcho(string $audioURL, $echoIDs = null): bool
     {
@@ -703,37 +706,36 @@ class UltimateVoiceDevice extends IPSModule
         if ($echoIDs === null) {
             $ids = [$this->ReadPropertyInteger('EchoRemoteID')];
         } elseif (is_array($echoIDs)) {
-            $ids = $echoIDs;
+            $ids = array_values(array_filter(array_map('intval', $echoIDs), fn($i) => $i > 0));
         } else {
             $ids = [(int)$echoIDs];
         }
 
-        $ssml    = '<speak><audio src="' . htmlspecialchars($audioURL, ENT_XML1) . '"/></speak>';
-        $success = false;
+        // Ungültige IDs herausfiltern
+        $validIds = array_values(array_filter($ids, fn($i) => $i > 0 && IPS_InstanceExists($i)));
 
-        foreach ($ids as $echoId) {
-            $echoId = (int)$echoId;
-            if ($echoId <= 0) {
-                $this->SendDebug('EchoRemote', "Übersprungen: ID=$echoId (ungültig)", 0);
-                continue;
-            }
-            if (!IPS_InstanceExists($echoId)) {
-                $this->SendDebug('EchoRemote', "Übersprungen: Instanz $echoId existiert nicht", 0);
-                $this->LogMessage("UV: EchoRemote Instanz $echoId existiert nicht — übersprungen.", KL_WARNING);
-                continue;
-            }
+        if (empty($validIds)) {
+            $this->LogMessage('UV: Kein gültiges Echo-Gerät gefunden.', KL_WARNING);
+            $this->SendDebug('EchoRemote', 'FEHLER: Keine gültigen IDs in ' . json_encode($ids), 0);
+            return false;
+        }
 
+        $ssml = '<speak><audio src="' . htmlspecialchars($audioURL, ENT_XML1) . '"/></speak>';
+
+        if (count($validIds) === 1) {
+            // Einzelgerät — klassischer Aufruf
+            $echoId = $validIds[0];
             $this->SendDebug('EchoRemote', "Sende an ID=$echoId: $ssml", 0);
             EchoRemote_TextToSpeech($echoId, $ssml);
             $this->LogMessage("UV: Echo-Announce ID=$echoId: $audioURL", KL_MESSAGE);
-            $success = true;
+        } else {
+            // Mehrere Geräte — ECHOREMOTE_TextToSpeechEx spielt SIMULTAN auf allen
+            $this->SendDebug('EchoRemote', 'Simultan an IDs=' . json_encode($validIds) . ': ' . $ssml, 0);
+            ECHOREMOTE_TextToSpeechEx($validIds[0], $ssml, $validIds, []);
+            $this->LogMessage('UV: Echo-Announce simultan an ' . count($validIds) . ' Geräten: ' . $audioURL, KL_MESSAGE);
         }
 
-        if (!$success) {
-            $this->LogMessage('UV: Kein gültiges Echo-Gerät gefunden.', KL_WARNING);
-        }
-
-        return $success;
+        return true;
     }
 
     private function RequestGenerate(
