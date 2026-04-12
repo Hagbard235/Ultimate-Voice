@@ -239,12 +239,12 @@ class UltimateVoiceDevice extends IPSModule
                         [
                             'type'    => 'Button',
                             'caption' => 'Sprechen (Cache)',
-                            'onClick' => 'echo UVD_Speak($id, (string)($TestEventType ?? \'\'), (string)($TestRoom ?? \'\'));',
+                            'onClick' => 'UVD_Speak($id, (string)($TestEventType ?? \'\'), (string)($TestRoom ?? \'\'));',
                         ],
                         [
                             'type'    => 'Button',
                             'caption' => 'Neu generieren (LLM-Test)',
-                            'onClick' => 'echo UVD_ForceSpeak($id, (string)($TestEventType ?? \'\'), (string)($TestRoom ?? \'\'));',
+                            'onClick' => 'UVD_ForceSpeak($id, (string)($TestEventType ?? \'\'), (string)($TestRoom ?? \'\'));',
                         ],
                         [
                             'type'    => 'Button',
@@ -318,22 +318,20 @@ class UltimateVoiceDevice extends IPSModule
     // =========================================================================
 
     /**
-     * Spricht eine Phrase für das angegebene Event aus.
+     * Spricht eine Phrase für das angegebene Event aus (konfiguriertes Echo-Gerät).
      *
-     * @param string     $EventType  Event-ID aus dem Portal (z.B. doorbell, motion_detected, …)
-     * @param string     $Room       Optionaler Raum-/Kontext-String (z.B. "Wohnzimmer").
-     * @param int|array  $EchoIDs    Optional: einzelne EchoRemote-Instanz-ID (int) ODER
-     *                               Array von IDs für gleichzeitige Ausgabe auf mehreren Geräten.
-     *                               Wenn weggelassen: konfigurierte Instanz wird verwendet.
+     * @param string $EventType  Event-ID aus dem Portal (z.B. doorbell, motion_detected, …)
+     * @param string $Room       Optionaler Raum-/Kontext-String (z.B. "Wohnzimmer").
      *
      * Beispiele:
      *   UVD_Speak($id, 'doorbell');
      *   UVD_Speak($id, 'doorbell', 'Garage');
-     *   UVD_Speak($id, 'doorbell', '', 54321);
-     *   UVD_Speak($id, 'motion_detected', 'Eingang', [12345, 67890, 11111]);
+     *
+     * Für eigene Echo-Auswahl → UVD_SpeakMulti($id, 'doorbell', '', [12345]);
      */
-    public function Speak(string $EventType = '', string $Room = '', $EchoIDs = null): bool
+    public function Speak(string $EventType = '', string $Room = ''): bool
     {
+        $EchoIDs = null;
         $serverURL   = rtrim($this->ReadPropertyString('ServerURL'), '/');
         $apiKey      = $this->ReadPropertyString('APIKey');
         $characterId = $this->ReadPropertyString('CharacterID');
@@ -451,13 +449,15 @@ class UltimateVoiceDevice extends IPSModule
     }
 
     /**
-     * Wie Speak(), erzwingt aber neue LLM-Generierung.
+     * Wie Speak(), erzwingt aber neue LLM-Generierung (konfiguriertes Echo-Gerät).
      * Aufruf: UVD_ForceSpeak($instanzId, 'doorbell');
      *         UVD_ForceSpeak($instanzId, 'motion_detected', 'Garten');
-     *         UVD_ForceSpeak($instanzId, 'doorbell', '', [12345, 67890]);
+     *
+     * Für eigene Echo-Auswahl → UVD_ForceSpeakMulti($id, 'doorbell', '', [12345]);
      */
-    public function ForceSpeak(string $EventType = '', string $Room = '', $EchoIDs = null): bool
+    public function ForceSpeak(string $EventType = '', string $Room = ''): bool
     {
+        $EchoIDs = null;
         $this->SendDebug('ForceSpeak', "Erzwinge Neu-Generierung für: $EventType | Room=$Room", 0);
 
         $cacheKey = $Room ? "{$EventType}::{$Room}" : $EventType;
