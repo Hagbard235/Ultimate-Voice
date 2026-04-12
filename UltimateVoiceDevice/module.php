@@ -331,121 +331,7 @@ class UltimateVoiceDevice extends IPSModule
      */
     public function Speak(string $EventType = '', string $Room = ''): bool
     {
-        $EchoIDs = null;
-        $serverURL   = rtrim($this->ReadPropertyString('ServerURL'), '/');
-        $apiKey      = $this->ReadPropertyString('APIKey');
-        $characterId = $this->ReadPropertyString('CharacterID');
-        $mode        = $this->ReadPropertyString('DeliveryMode');
-
-        $echoLabel = is_array($EchoIDs) ? count($EchoIDs) . ' Geräte' : ($EchoIDs > 0 ? "ID=$EchoIDs" : 'konfiguriert');
-        $this->SendDebug('Speak', "EventType=$EventType | Room=$Room | CharacterID=$characterId | DeliveryMode=$mode | Echo=$echoLabel", 0);
-        $this->LogMessage("UV: Speak('$EventType'" . ($Room ? ", Raum='$Room'" : '') . ") — Modus=$mode, Charakter=$characterId, Echo=$echoLabel", KL_MESSAGE);
-
-        if (empty($serverURL)) {
-            $this->SendDebug('Speak', 'FEHLER: Server URL nicht konfiguriert', 0);
-            $this->LogMessage('UV: Server URL nicht konfiguriert.', KL_ERROR);
-            return false;
-        }
-
-        // --- Step 1: Lokaler Cache-Check (webhook + userdir) ---
-        $cacheKey = $Room ? "{$EventType}::{$Room}" : $EventType;
-        if ($mode === 'webhook' || $mode === 'userdir') {
-            $index  = $this->LoadLocalIndex();
-            $cached = $index[$cacheKey] ?? $index[$EventType] ?? null;
-            $this->SendDebug('LocalCache', "cacheKey=$cacheKey | entry=" . ($cached ? json_encode($cached) : 'nicht vorhanden'), 0);
-
-            if ($cached) {
-                $fileId      = $cached['file_id'];
-                $correctPath = $this->GetLocalFilePath($mode, $fileId);
-
-                if (file_exists($correctPath)) {
-                    $this->SendDebug('LocalCache', "Hit! $correctPath", 0);
-                    $this->LogMessage("UV: Lokaler Cache-Hit für '$EventType'", KL_MESSAGE);
-                    $this->SetValue('LastSpokenText', $cached['text'] ?? '(gecacht)');
-                    $this->SetValue('LastAudioURL',   $correctPath);
-                    if ($mode === 'userdir') return $this->AnnounceViaUserDir($fileId, $EchoIDs);
-                    return $this->AnnounceViaWebhook($fileId, $EchoIDs);
-                }
-
-                if (!empty($cached['path']) && file_exists($cached['path'])) {
-                    $destDir = dirname($correctPath);
-                    if (!is_dir($destDir)) mkdir($destDir, 0755, true);
-                    copy($cached['path'], $correctPath);
-                    $this->SendDebug('LocalCache', "Kopiert: {$cached['path']} → $correctPath", 0);
-                    $this->LogMessage("UV: Cache-Datei in neuen Modus-Pfad kopiert", KL_MESSAGE);
-                    $this->SetValue('LastSpokenText', $cached['text'] ?? '(gecacht)');
-                    $this->SetValue('LastAudioURL',   $correctPath);
-                    if ($mode === 'userdir') return $this->AnnounceViaUserDir($fileId, $EchoIDs);
-                    return $this->AnnounceViaWebhook($fileId, $EchoIDs);
-                }
-
-                $this->SendDebug('LocalCache', "Miss — Datei nicht gefunden (file_id=$fileId)", 0);
-            }
-            $this->SendDebug('LocalCache', 'Miss — Server wird angefragt', 0);
-        }
-
-        // --- Step 2: Server anfragen ---
-        $this->SendDebug('ServerRequest', "GET $serverURL/v1/characters/$characterId/play/$EventType room=$Room", 0);
-        $response = $this->RequestGenerate($serverURL, $apiKey, $characterId, $EventType, false, $Room);
-
-        if ($response === false) {
-            $this->SendDebug('ServerRequest', 'FEHLER: Kein Ergebnis', 0);
-            $this->LogMessage("UV: Server-Aufruf fehlgeschlagen für '$EventType'.", KL_ERROR);
-            return false;
-        }
-
-        $this->SendDebug('ServerRequest', 'Antwort: ' . json_encode($response), 0);
-        $this->LogMessage("UV: Server OK — \"{$response['text']}\" | from_cache=" . ($response['from_cache'] ? 'ja' : 'nein'), KL_MESSAGE);
-
-        $this->SetValue('LastSpokenText', $response['text']);
-        $this->SetValue('LastAudioURL',   $response['audio_url']);
-
-        // --- Step 3: Ausliefern ---
-        if ($mode === 'direct') {
-            $this->SendDebug('Deliver', 'direct → ' . $response['audio_url'], 0);
-            return $this->AnnounceViaDirect($response['audio_url'], $EchoIDs);
-        }
-
-        $fileId    = $response['file_id'];
-        $localFile = $this->GetLocalFilePath($mode, $fileId);
-        $localDir  = dirname($localFile);
-
-        $this->SendDebug('Deliver', "mode=$mode | file_id=$fileId | localFile=$localFile", 0);
-
-        if (!file_exists($localFile) || !$response['from_cache']) {
-            $this->SendDebug('Download', 'Starte Download: ' . $response['audio_url'], 0);
-            $audioData = $this->DownloadAudio($response['audio_url'], $apiKey);
-
-            if ($audioData === false) {
-                $this->SendDebug('Download', 'FEHLER: Download fehlgeschlagen', 0);
-                $this->LogMessage('UV: Download der Audio-Datei fehlgeschlagen.', KL_ERROR);
-                return false;
-            }
-
-            if (!is_dir($localDir)) {
-                mkdir($localDir, 0755, true);
-            }
-            file_put_contents($localFile, $audioData);
-            $this->SendDebug('Download', "Gespeichert: $localFile (" . strlen($audioData) . ' Bytes)', 0);
-            $this->LogMessage("UV: Audio gespeichert — " . strlen($audioData) . " Bytes", KL_MESSAGE);
-        } else {
-            $this->SendDebug('Download', 'Übersprungen — Datei vorhanden', 0);
-        }
-
-        $index = $this->LoadLocalIndex();
-        $index[$cacheKey] = [
-            'file_id' => $fileId,
-            'path'    => $localFile,
-            'text'    => $response['text'] ?? '',
-            'room'    => $Room ?: null,
-        ];
-        $this->SaveLocalIndex($index);
-        $this->SendDebug('LocalCache', "Index aktualisiert: $cacheKey → $fileId", 0);
-
-        if ($mode === 'userdir') {
-            return $this->AnnounceViaUserDir($fileId, $EchoIDs);
-        }
-        return $this->AnnounceViaWebhook($fileId, $EchoIDs);
+        return $this->SpeakInternal($EventType, $Room, false, null);
     }
 
     /**
@@ -457,69 +343,16 @@ class UltimateVoiceDevice extends IPSModule
      */
     public function ForceSpeak(string $EventType = '', string $Room = ''): bool
     {
-        $EchoIDs = null;
-        $this->SendDebug('ForceSpeak', "Erzwinge Neu-Generierung für: $EventType | Room=$Room", 0);
-
-        $cacheKey = $Room ? "{$EventType}::{$Room}" : $EventType;
-
-        $index = $this->LoadLocalIndex();
-        foreach ([$cacheKey, $EventType] as $key) {
-            if (isset($index[$key])) {
-                $fileId = $index[$key]['file_id'] ?? '';
-                if ($fileId) {
-                    $this->DeleteUserDirFile($fileId);
-                    $cachePath = $this->GetCacheDir() . DIRECTORY_SEPARATOR . $fileId . '.mp3';
-                    if (file_exists($cachePath)) unlink($cachePath);
-                    $this->SendDebug('ForceSpeak', "Lokale Datei gelöscht: $fileId", 0);
-                }
-                unset($index[$key]);
-            }
-        }
-        $this->SaveLocalIndex($index);
-
-        $serverURL   = rtrim($this->ReadPropertyString('ServerURL'), '/');
-        $apiKey      = $this->ReadPropertyString('APIKey');
-        $characterId = $this->ReadPropertyString('CharacterID');
-        $mode        = $this->ReadPropertyString('DeliveryMode');
-
-        $response = $this->RequestGenerate($serverURL, $apiKey, $characterId, $EventType, true, $Room);
-
-        if ($response === false) {
-            $this->LogMessage("UV: ForceSpeak Server-Fehler für '$EventType'.", KL_ERROR);
-            return false;
-        }
-
-        $this->LogMessage("UV: ForceSpeak OK — \"{$response['text']}\"", KL_MESSAGE);
-        $this->SetValue('LastSpokenText', $response['text']);
-        $this->SetValue('LastAudioURL',   $response['audio_url']);
-
-        if ($mode === 'direct') {
-            return $this->AnnounceViaDirect($response['audio_url'], $EchoIDs);
-        }
-
-        $fileId    = $response['file_id'];
-        $localFile = $this->GetLocalFilePath($mode, $fileId);
-        if (!is_dir(dirname($localFile))) mkdir(dirname($localFile), 0755, true);
-        $audioData = $this->DownloadAudio($response['audio_url'], $apiKey);
-        if ($audioData === false) return false;
-        file_put_contents($localFile, $audioData);
-        $this->SendDebug('ForceSpeak', "Gespeichert: $localFile (" . strlen($audioData) . ' Bytes)', 0);
-
-        $index = $this->LoadLocalIndex();
-        $index[$cacheKey] = ['file_id' => $fileId, 'path' => $localFile, 'text' => $response['text'], 'room' => $Room ?: null];
-        $this->SaveLocalIndex($index);
-
-        if ($mode === 'userdir') return $this->AnnounceViaUserDir($fileId, $EchoIDs);
-        return $this->AnnounceViaWebhook($fileId, $EchoIDs);
+        return $this->SpeakInternal($EventType, $Room, true, null);
     }
 
     /**
      * Spricht eine Phrase gleichzeitig auf mehreren Echo-Geräten.
      * Alle Geräte im Array spielen simultan — kein Delay zwischen den Dots.
      *
-     * @param string $EventType  Event-ID (z.B. 'doorbell', 'motion_detected')
-     * @param string $Room       Optionaler Raum-Kontext
-     * @param array  $EchoIDs   Array mit EchoRemote-Instanz-IDs, z.B. [34274, 45302, 59264]
+     * @param string     $EventType  Event-ID (z.B. 'doorbell', 'motion_detected')
+     * @param string     $Room       Optionaler Raum-Kontext
+     * @param int|array  $EchoIDs    Array mit EchoRemote-Instanz-IDs, z.B. [34274, 45302, 59264]
      *
      * Aufruf: UVD_SpeakMulti($id, 'doorbell', '', [34274, 45302, 59264, 57384]);
      *         UVD_SpeakMulti($id, 'motion_detected', 'EG', [34274, 45302]);
@@ -529,7 +362,7 @@ class UltimateVoiceDevice extends IPSModule
         if (!is_array($EchoIDs)) {
             $EchoIDs = $EchoIDs ? [(int)$EchoIDs] : [];
         }
-        return $this->Speak($EventType, $Room, $EchoIDs);
+        return $this->SpeakInternal($EventType, $Room, false, $EchoIDs);
     }
 
     /**
@@ -541,7 +374,91 @@ class UltimateVoiceDevice extends IPSModule
         if (!is_array($EchoIDs)) {
             $EchoIDs = $EchoIDs ? [(int)$EchoIDs] : [];
         }
-        return $this->ForceSpeak($EventType, $Room, $EchoIDs);
+        return $this->SpeakInternal($EventType, $Room, true, $EchoIDs);
+    }
+
+    /**
+     * Zentrale Implementierung für alle Speak-Varianten.
+     *
+     * Der Server wird bei JEDEM Aufruf kontaktiert — er wählt zufällig eine der
+     * vorhandenen Phrasen aus, sodass die Rotation funktioniert.
+     * Die MP3-Dateien werden lokal gecacht (nach file_id). Wenn der Server eine
+     * file_id zurückgibt, die lokal bereits vorhanden ist, wird KEIN Download
+     * ausgelöst — die lokale Datei wird direkt gespielt.
+     *
+     * Warum kein lokaler "Event → file_id"-Index mehr?
+     * Weil ein solcher Index immer dieselbe Datei liefern würde und die
+     * server-seitige Zufallsauswahl unterläuft.
+     */
+    private function SpeakInternal(string $EventType, string $Room, bool $force, $EchoIDs): bool
+    {
+        $serverURL   = rtrim($this->ReadPropertyString('ServerURL'), '/');
+        $apiKey      = $this->ReadPropertyString('APIKey');
+        $characterId = $this->ReadPropertyString('CharacterID');
+        $mode        = $this->ReadPropertyString('DeliveryMode');
+
+        $echoLabel = is_array($EchoIDs) ? count($EchoIDs) . ' Geräte' : 'konfiguriert';
+        $tag = $force ? 'ForceSpeak' : 'Speak';
+        $this->SendDebug($tag, "EventType=$EventType | Room=$Room | CharacterID=$characterId | DeliveryMode=$mode | Echo=$echoLabel | force=" . ($force ? 'ja' : 'nein'), 0);
+        $this->LogMessage("UV: {$tag}('$EventType'" . ($Room ? ", Raum='$Room'" : '') . ") — Modus=$mode, Charakter=$characterId", KL_MESSAGE);
+
+        if (empty($serverURL)) {
+            $this->SendDebug($tag, 'FEHLER: Server URL nicht konfiguriert', 0);
+            $this->LogMessage('UV: Server URL nicht konfiguriert.', KL_ERROR);
+            return false;
+        }
+
+        // --- Server anfragen (immer — er wählt zufällig aus den vorhandenen Phrasen) ---
+        $this->SendDebug($tag, "GET $serverURL/v1/characters/$characterId/play/$EventType room=$Room force=$force", 0);
+        $response = $this->RequestGenerate($serverURL, $apiKey, $characterId, $EventType, $force, $Room);
+
+        if ($response === false) {
+            $this->SendDebug($tag, 'FEHLER: Kein Ergebnis vom Server', 0);
+            $this->LogMessage("UV: Server-Aufruf fehlgeschlagen für '$EventType'.", KL_ERROR);
+            return false;
+        }
+
+        $this->SendDebug($tag, 'Antwort: ' . json_encode($response), 0);
+        $this->LogMessage("UV: Server OK — \"{$response['text']}\" | from_cache=" . ($response['from_cache'] ? 'ja' : 'nein'), KL_MESSAGE);
+
+        $this->SetValue('LastSpokenText', $response['text']);
+        $this->SetValue('LastAudioURL',   $response['audio_url']);
+
+        // --- direct-Modus: Audio-URL direkt an Alexa ---
+        if ($mode === 'direct') {
+            $this->SendDebug($tag, 'direct → ' . $response['audio_url'], 0);
+            return $this->AnnounceViaDirect($response['audio_url'], $EchoIDs);
+        }
+
+        // --- webhook / userdir: MP3 lokal cachen (nach file_id), dann abspielen ---
+        $fileId    = $response['file_id'];
+        $localFile = $this->GetLocalFilePath($mode, $fileId);
+
+        if (!file_exists($localFile)) {
+            // Datei noch nicht lokal vorhanden → herunterladen
+            $this->SendDebug($tag, "Download (neu): $fileId", 0);
+            $audioData = $this->DownloadAudio($response['audio_url'], $apiKey);
+            if ($audioData === false) {
+                $this->SendDebug($tag, 'FEHLER: Download fehlgeschlagen', 0);
+                $this->LogMessage('UV: Download der Audio-Datei fehlgeschlagen.', KL_ERROR);
+                return false;
+            }
+            $localDir = dirname($localFile);
+            if (!is_dir($localDir)) {
+                mkdir($localDir, 0755, true);
+            }
+            file_put_contents($localFile, $audioData);
+            $this->SendDebug($tag, "Gespeichert: $localFile (" . strlen($audioData) . ' Bytes)', 0);
+            $this->LogMessage("UV: Audio gespeichert — " . strlen($audioData) . " Bytes ($fileId)", KL_MESSAGE);
+        } else {
+            // Datei bereits vorhanden → kein Download nötig
+            $this->SendDebug($tag, "Lokaler Hit: $localFile (kein Download)", 0);
+        }
+
+        if ($mode === 'userdir') {
+            return $this->AnnounceViaUserDir($fileId, $EchoIDs);
+        }
+        return $this->AnnounceViaWebhook($fileId, $EchoIDs);
     }
 
     public function GetWebhookStatus(): string
@@ -866,20 +783,23 @@ class UltimateVoiceDevice extends IPSModule
 
     public function ClearCache(): string
     {
-        $index   = $this->LoadLocalIndex();
-        $deleted = 0;
+        $deleted  = 0;
+        $cacheDir = $this->GetCacheDir();
+        $userDir  = IPS_GetKernelDir() . 'user' . DIRECTORY_SEPARATOR;
 
-        foreach ($index as $eventType => $entry) {
-            $this->DeleteUserDirFile($entry['file_id']);
-            $cachePath = $this->GetCacheDir() . DIRECTORY_SEPARATOR . $entry['file_id'] . '.mp3';
-            if (file_exists($cachePath)) {
-                unlink($cachePath);
+        // Alle lokal gecachten MP3s löschen (sowohl media/ als auch user/)
+        if (is_dir($cacheDir)) {
+            foreach (glob($cacheDir . DIRECTORY_SEPARATOR . '*.mp3') ?: [] as $file) {
+                unlink($file);
+                $deleted++;
             }
-            $deleted++;
+        }
+        // user/-Verzeichnis: alle uv_*.mp3 löschen
+        foreach (glob($userDir . 'uv_*.mp3') ?: [] as $file) {
+            unlink($file);
         }
 
-        $this->SaveLocalIndex([]);
-        $this->SendDebug('ClearCache', "Geleert — $deleted Einträge entfernt", 0);
+        $this->SendDebug('ClearCache', "Geleert — $deleted Dateien gelöscht", 0);
         $this->LogMessage("UV: Lokaler Cache geleert ($deleted Dateien)", KL_MESSAGE);
         return "✅ Cache geleert — $deleted Dateien entfernt.";
     }
