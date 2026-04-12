@@ -239,12 +239,12 @@ class UltimateVoiceDevice extends IPSModule
                         [
                             'type'    => 'Button',
                             'caption' => 'Sprechen (Cache)',
-                            'onClick' => 'echo UVD_Speak($id, $TestEventType, $TestRoom);',
+                            'onClick' => 'echo UVD_Speak($id, (string)($TestEventType ?? \'\'), (string)($TestRoom ?? \'\'));',
                         ],
                         [
                             'type'    => 'Button',
                             'caption' => 'Neu generieren (LLM-Test)',
-                            'onClick' => 'echo UVD_ForceSpeak($id, $TestEventType, $TestRoom);',
+                            'onClick' => 'echo UVD_ForceSpeak($id, (string)($TestEventType ?? \'\'), (string)($TestRoom ?? \'\'));',
                         ],
                         [
                             'type'    => 'Button',
@@ -332,7 +332,7 @@ class UltimateVoiceDevice extends IPSModule
      *   UVD_Speak($id, 'doorbell', '', 54321);
      *   UVD_Speak($id, 'motion_detected', 'Eingang', [12345, 67890, 11111]);
      */
-    public function Speak(string $EventType, string $Room = '', $EchoIDs = null): bool
+    public function Speak(string $EventType = '', string $Room = '', $EchoIDs = null): bool
     {
         $serverURL   = rtrim($this->ReadPropertyString('ServerURL'), '/');
         $apiKey      = $this->ReadPropertyString('APIKey');
@@ -456,7 +456,7 @@ class UltimateVoiceDevice extends IPSModule
      *         UVD_ForceSpeak($instanzId, 'motion_detected', 'Garten');
      *         UVD_ForceSpeak($instanzId, 'doorbell', '', [12345, 67890]);
      */
-    public function ForceSpeak(string $EventType, string $Room = '', $EchoIDs = null): bool
+    public function ForceSpeak(string $EventType = '', string $Room = '', $EchoIDs = null): bool
     {
         $this->SendDebug('ForceSpeak', "Erzwinge Neu-Generierung für: $EventType | Room=$Room", 0);
 
@@ -524,8 +524,11 @@ class UltimateVoiceDevice extends IPSModule
      * Aufruf: UVD_SpeakMulti($id, 'doorbell', '', [34274, 45302, 59264, 57384]);
      *         UVD_SpeakMulti($id, 'motion_detected', 'EG', [34274, 45302]);
      */
-    public function SpeakMulti(string $EventType, string $Room, array $EchoIDs): bool
+    public function SpeakMulti(string $EventType, string $Room, $EchoIDs): bool
     {
+        if (!is_array($EchoIDs)) {
+            $EchoIDs = $EchoIDs ? [(int)$EchoIDs] : [];
+        }
         return $this->Speak($EventType, $Room, $EchoIDs);
     }
 
@@ -533,8 +536,11 @@ class UltimateVoiceDevice extends IPSModule
      * Wie SpeakMulti(), erzwingt aber neue LLM-Generierung.
      * Aufruf: UVD_ForceSpeakMulti($id, 'doorbell', '', [34274, 45302]);
      */
-    public function ForceSpeakMulti(string $EventType, string $Room, array $EchoIDs): bool
+    public function ForceSpeakMulti(string $EventType, string $Room, $EchoIDs): bool
     {
+        if (!is_array($EchoIDs)) {
+            $EchoIDs = $EchoIDs ? [(int)$EchoIDs] : [];
+        }
         return $this->ForceSpeak($EventType, $Room, $EchoIDs);
     }
 
@@ -587,7 +593,7 @@ class UltimateVoiceDevice extends IPSModule
 
     public function TestSpeak(string $EventType = ''): string
     {
-        $eventType = $EventType ?: $this->ReadPropertyString('TestEventType');
+        $eventType = $EventType;
         $mode      = $this->ReadPropertyString('DeliveryMode');
         $serverURL = $this->ReadPropertyString('ServerURL');
         $echoId    = $this->ReadPropertyInteger('EchoRemoteID');
